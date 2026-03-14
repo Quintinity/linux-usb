@@ -1,4 +1,4 @@
-# RobotOS USB - Epic Breakdown
+# armOS USB - Epic Breakdown
 
 **Author:** John (Product Manager Agent)
 **Date:** 2026-03-15
@@ -9,7 +9,7 @@
 
 ## Overview
 
-This document provides the complete epic and story breakdown for RobotOS USB, decomposing the requirements from the PRD and Architecture into implementable stories. Epics are ordered by the architecture's migration phases (A through F) and aligned to the PRD's three-phase product scope: MVP (v0.1), Growth (v0.5), and Vision (v1.0).
+This document provides the complete epic and story breakdown for armOS USB, decomposing the requirements from the PRD and Architecture into implementable stories. Epics are ordered by the architecture's migration phases (A through F) and aligned to the PRD's three-phase product scope: MVP (v0.1), Growth (v0.5), and Vision (v1.0).
 
 ---
 
@@ -70,7 +70,7 @@ This document provides the complete epic and story breakdown for RobotOS USB, de
 | NFR3 | Hardware auto-detection <= 5 seconds | Performance |
 | NFR4 | Dashboard telemetry >= 10 Hz | Performance |
 | NFR5 | Boot time <= 90 seconds to dashboard | Performance |
-| NFR6 | Automatic retry on transient servo failures (max 3) | Reliability |
+| NFR6 | Automatic retry on transient servo failures (up to 10 retries) | Reliability |
 | NFR7 | Bus disconnection detection <= 2 seconds | Reliability |
 | NFR8 | No episode data loss on system error | Reliability |
 | NFR9 | Survive unexpected power loss (journaled FS) | Reliability |
@@ -85,7 +85,7 @@ This document provides the complete epic and story breakdown for RobotOS USB, de
 | NFR18 | Servo driver interface < 15 methods, < 500 LOC | Maintainability |
 | NFR19 | Structured hardware event logging | Maintainability |
 | NFR20 | No network services on fresh boot | Security |
-| NFR21 | Serial access restricted to robotos group (MODE=0660) | Security |
+| NFR21 | Serial access restricted to armos group (MODE=0660) | Security |
 | NFR22 | No user data transmitted without explicit action | Security |
 
 ---
@@ -108,7 +108,8 @@ This document provides the complete epic and story breakdown for RobotOS USB, de
 | 3.3 | FR12, FR13 |
 | 3.4 | FR14 |
 | 4.1 | FR19 (partial) |
-| 4.2 | FR19, FR23 |
+| 4.2a | FR19, FR23 |
+| 4.2b | FR19, FR23 |
 | 4.3 | FR19, FR21 |
 | 4.4 | FR22 |
 | 5.1 | FR20, FR16 |
@@ -121,7 +122,8 @@ This document provides the complete epic and story breakdown for RobotOS USB, de
 | 7.1 | FR33 (TUI), FR34 (TUI) |
 | 7.2 | FR33 (TUI) |
 | 7.3 | FR34 (TUI), NFR11 |
-| 8.1 | FR28, FR30, NFR5, NFR14 |
+| 8.1a | NFR5 (spike validation) |
+| 8.1b | FR28, FR30, NFR5, NFR14 |
 | 8.2 | FR6, FR29, NFR9 |
 | 8.3 | FR31 |
 | 8.4 | NFR10 |
@@ -141,6 +143,7 @@ This document provides the complete epic and story breakdown for RobotOS USB, de
 
 | Epic | Title | Phase | Product Scope | Priority |
 |------|-------|-------|---------------|----------|
+| 0 | Sprint 0 -- Tooling and Environment Setup | Pre-A (Sprint 0) | MVP | P0 |
 | 1 | Package Skeleton and CLI Foundation | A (Package skeleton) | MVP | P0 |
 | 2 | Hardware Abstraction Layer -- Feetech | B (HAL and profiles) | MVP | P0 |
 | 3 | Robot Profile System -- SO-101 | B (HAL and profiles) | MVP | P0 |
@@ -149,14 +152,69 @@ This document provides the complete epic and story breakdown for RobotOS USB, de
 | 6 | Calibration and Teleop CLI | D (Calibration, teleop, TUI) | MVP | P0 |
 | 7 | TUI Launcher | D (Calibration, teleop, TUI) | MVP | P1 |
 | 8 | Pre-built USB Image | E (ISO build and AI) | MVP | P0 |
-| 9 | AI Integration and Data Collection | E (ISO build and AI) | MVP | P1 |
+| 9 | AI Integration and Data Collection | E (ISO build and AI) | MVP | P0 |
 | 10 | Growth Phase -- Multi-Hardware and Polish | F (Growth and polish) | Growth/Vision | P2 |
+
+---
+
+## Epic 0: Sprint 0 -- Tooling and Environment Setup
+
+**Goal:** Establish CI/CD, test infrastructure, MockServoProtocol, code quality tooling, and hardware inventory before any feature work begins.
+
+**Migration Phase:** Pre-A (Sprint 0)
+**Product Scope:** MVP (v0.1)
+
+### Story 0.1: CI/CD, Test Fixtures, MockServoProtocol, and Code Quality Tooling
+
+As a **developer**,
+I want a CI/CD pipeline, pytest configuration, MockServoProtocol, and pre-commit hooks (ruff, mypy) in place from day one,
+So that every subsequent story has automated testing, consistent code quality, and regression safety.
+
+**Acceptance Criteria:**
+
+**Given** the repository has a GitHub Actions workflow
+**When** I push to any branch
+**Then** ruff lint, mypy type check, and pytest all run and must pass
+
+**Given** the `MockServoProtocol` class exists
+**When** I instantiate it with `servo_ids=[1,2,3,4,5,6]`
+**Then** it implements the full `ServoProtocol` ABC with in-memory state, configurable failure rates, and a call log for assertions
+
+**Given** `conftest.py` exists
+**When** I run pytest
+**Then** fixtures are available: `mock_protocol`, `sample_profile`, `tmp_config_dir`
+
+**Size:** M
+**Dependencies:** None
+**Sprint:** 0
+
+---
+
+### Story 0.2: Hardware Inventory and Test Environment Setup
+
+As a **developer**,
+I want a documented inventory of all available test hardware (machines, cameras, USB hubs, servos) and a reproducible development environment setup,
+So that I know what is available for testing and can onboard quickly.
+
+**Acceptance Criteria:**
+
+**Given** the hardware inventory document exists
+**When** I read it
+**Then** it lists all available test machines, USB cameras, USB hubs, servo controllers, and what needs to be sourced
+
+**Given** a new developer clones the repo
+**When** they run `make dev`
+**Then** a development virtualenv is created with all dependencies installed
+
+**Size:** S
+**Dependencies:** None
+**Sprint:** 0
 
 ---
 
 ## Epic 1: Package Skeleton and CLI Foundation
 
-**Goal:** Create the `robotos` Python package with a working CLI entry point. Move existing scripts into the package structure so that everything is invoked as `robotos <command>` instead of `python <script>.py`. This is the foundation every other epic builds on.
+**Goal:** Create the `armos` Python package with a working CLI entry point. Move existing scripts into the package structure so that everything is invoked as `armos <command>` instead of `python <script>.py`. This is the foundation every other epic builds on.
 
 **Migration Phase:** A
 **Product Scope:** MVP (v0.1)
@@ -164,16 +222,16 @@ This document provides the complete epic and story breakdown for RobotOS USB, de
 ### Story 1.1: Initialize Python Package with pyproject.toml
 
 As a **developer**,
-I want a `robotos` Python package with `pyproject.toml`, proper entry points, and a `click`-based CLI skeleton,
+I want a `armos` Python package with `pyproject.toml`, proper entry points, and a `click`-based CLI skeleton,
 So that all future commands have a consistent, installable entry point.
 
 **Acceptance Criteria:**
 
-**Given** the repository root contains `robotos/` and `pyproject.toml`
+**Given** the repository root contains `armos/` and `pyproject.toml`
 **When** I run `pip install -e .` in the repository root
-**Then** the `robotos` command is available on PATH
-**And** running `robotos --help` displays available command groups
-**And** running `robotos --version` displays the version string `0.1.0`
+**Then** the `armos` command is available on PATH
+**And** running `armos --help` displays available command groups
+**And** running `armos --version` displays the version string `0.1.0`
 
 **Size:** S
 **Dependencies:** None
@@ -188,12 +246,12 @@ So that the command surface area is established and each epic can fill in the im
 
 **Acceptance Criteria:**
 
-**Given** the `robotos` package is installed
-**When** I run `robotos detect --help`
+**Given** the `armos` package is installed
+**When** I run `armos detect --help`
 **Then** I see a help message describing the detect command
 **And** the same works for `status`, `calibrate`, `teleop`, `record`, `diagnose`, `monitor`, `exercise`, and `config`
 
-**Given** a stub command is invoked (e.g., `robotos detect`)
+**Given** a stub command is invoked (e.g., `armos detect`)
 **When** the underlying implementation is not yet complete
 **Then** the command prints "Not yet implemented" and exits with code 1
 
@@ -205,7 +263,7 @@ So that the command surface area is established and each epic can fill in the im
 ### Story 1.3: Utility Module -- Serial Helpers
 
 As a **developer**,
-I want a `robotos.utils.serial` module with sign-magnitude decoding, port discovery helpers, and common serial constants,
+I want a `armos.utils.serial` module with sign-magnitude decoding, port discovery helpers, and common serial constants,
 So that all downstream code shares one tested implementation of these utilities.
 
 **Acceptance Criteria:**
@@ -226,14 +284,14 @@ So that all downstream code shares one tested implementation of these utilities.
 ### Story 1.4: Utility Module -- XDG Config Paths
 
 As a **developer**,
-I want a `robotos.utils.config` module that provides XDG-compliant paths for profiles, calibration, datasets, and logs,
+I want a `armos.utils.config` module that provides XDG-compliant paths for profiles, calibration, datasets, and logs,
 So that all file storage follows a consistent, predictable convention.
 
 **Acceptance Criteria:**
 
 **Given** the module is imported
 **When** I call `config_dir()`, `calibration_dir()`, `datasets_dir()`, `logs_dir()`
-**Then** each returns the correct XDG path under `~/.config/robotos/` or `~/.local/share/robotos/`
+**Then** each returns the correct XDG path under `~/.config/armos/` or `~/.local/share/armos/`
 **And** directories are created automatically if they do not exist
 
 **Size:** S
@@ -244,15 +302,15 @@ So that all file storage follows a consistent, predictable convention.
 ### Story 1.5: Migrate CLAUDE.md and AI Context Files
 
 As a **developer**,
-I want the CLAUDE.md and memory files updated to reference `robotos` CLI commands instead of raw Python scripts,
+I want the CLAUDE.md and memory files updated to reference `armos` CLI commands instead of raw Python scripts,
 So that AI-assisted troubleshooting works with the new package structure.
 
 **Acceptance Criteria:**
 
-**Given** a user has the `robotos` package installed
+**Given** a user has the `armos` package installed
 **When** Claude Code reads the CLAUDE.md
-**Then** all commands reference `robotos diagnose`, `robotos monitor`, etc., not `python diagnose_arms.py`
-**And** the CLAUDE.md documents the `robotos` CLI command set
+**Then** all commands reference `armos diagnose`, `armos monitor`, etc., not `python diagnose_arms.py`
+**And** the CLAUDE.md documents the `armos` CLI command set
 
 **Size:** S
 **Dependencies:** 1.2
@@ -274,8 +332,8 @@ So that all servo communication goes through a testable, swappable abstraction.
 
 **Acceptance Criteria:**
 
-**Given** the `ServoProtocol` ABC exists in `robotos.hal.protocol`
-**When** I implement `FeetechPlugin(ServoProtocol)` in `robotos.hal.plugins.feetech`
+**Given** the `ServoProtocol` ABC exists in `armos.hal.protocol`
+**When** I implement `FeetechPlugin(ServoProtocol)` in `armos.hal.plugins.feetech`
 **Then** the plugin wraps `FeetechMotorsBus` from LeRobot
 **And** all 10+ abstract methods are implemented
 **And** the plugin is discoverable via `ServoProtocol.get_plugin("feetech")`
@@ -393,7 +451,7 @@ So that I can use my SO-101 without creating any configuration files.
 
 **Acceptance Criteria:**
 
-**Given** the `robotos` package is installed
+**Given** the `armos` package is installed
 **When** I call `ProfileLoader.list_profiles()`
 **Then** "SO-101" appears in the list with description "HuggingFace SO-101 6-DOF robot arm (leader/follower pair)"
 
@@ -419,7 +477,7 @@ So that I do not have to recalibrate every time I reboot.
 
 **Given** a calibration procedure has been completed for the follower arm
 **When** the calibration data is saved
-**Then** a JSON file is written to `~/.config/robotos/calibration/{instance_id}/follower.json`
+**Then** a JSON file is written to `~/.config/armos/calibration/{instance_id}/follower.json`
 **And** the file contains per-joint min/max register values and homing offsets
 
 **Given** the system starts and detects the same servo controller (matched by USB serial number)
@@ -455,6 +513,33 @@ So that I know to recalibrate after replacing a servo or reassembling my arm.
 
 ---
 
+### Story 3.5: Camera Auto-Detection and CameraManager Integration
+
+As a **user**,
+I want the system to auto-detect USB cameras via V4L2 and provide a CameraManager for opening and managing camera streams,
+So that cameras are available for data collection and monitoring without manual configuration.
+
+**Acceptance Criteria:**
+
+**Given** one or more USB cameras are connected
+**When** I run `armos detect`
+**Then** the output includes each camera's device path, supported resolutions, and frame rates
+
+**Given** a detected camera device path
+**When** `CameraManager.open(device_path)` is called
+**Then** it returns an OpenCV `VideoCapture` object ready for frame capture
+
+**Given** no cameras are connected
+**When** the CameraManager enumerates devices
+**Then** it returns an empty list without error
+
+**Size:** M
+**Dependencies:** 1.3
+**Sprint:** 3
+**Implements:** FR4
+
+---
+
 ## Epic 4: Diagnostic Framework Refactor
 
 **Goal:** Decompose the monolithic `diagnose_arms.py` (11 phases) into a modular diagnostic framework with individual check classes, a runner, and pluggable output reporters. Each check becomes independently runnable and testable.
@@ -484,25 +569,47 @@ So that diagnostics are composable, extensible, and independently testable.
 
 ---
 
-### Story 4.2: Migrate Existing Diagnostic Checks
+### Story 4.2a: Migrate Read-Only Diagnostic Checks
 
 As a **user**,
-I want all 11 diagnostic phases from `diagnose_arms.py` available as individual health checks,
-So that I can run a comprehensive hardware diagnostic or target a specific concern.
+I want the read-only diagnostic phases from `diagnose_arms.py` (ping, firmware, voltage, temp, status, config, calibration) available as individual health checks,
+So that I can quickly verify my hardware is connected and healthy without moving any servos.
 
 **Acceptance Criteria:**
 
-**Given** the following checks are implemented: PortDetection, ServoPing, FirmwareVersion, PowerHealth, StatusRegister, EEPROMConfig, CommsReliability, TorqueStress, CrossBusTeleop, MotorIsolation, CalibrationValid
-**When** I run `robotos diagnose`
-**Then** all 11 checks execute in sequence and produce a summary report
+**Given** the following checks are implemented: PortDetection, ServoPing, FirmwareVersion, PowerHealth, StatusRegister, EEPROMConfig, CalibrationValid
+**When** I run `armos diagnose`
+**Then** all 7 read-only checks execute in sequence and produce a summary report
 **And** each check uses the `ServoProtocol` and `RobotProfile` interfaces (not hardcoded Feetech calls)
 
-**Given** I want to check only servo communication
-**When** I run `robotos diagnose --check comms`
+**Given** I want to check only power health
+**When** I run `armos diagnose --check power`
+**Then** only the PowerHealth check executes
+
+**Size:** L
+**Dependencies:** 4.1, 2.1, 2.2, 2.3, 3.1, 3.3
+
+---
+
+### Story 4.2b: Migrate Active Diagnostic Checks
+
+As a **user**,
+I want the active diagnostic phases from `diagnose_arms.py` (comms reliability, torque stress, cross-bus teleop, motor isolation) available as individual health checks,
+So that I can run stress tests and advanced diagnostics that require servo motion.
+
+**Acceptance Criteria:**
+
+**Given** the following checks are implemented: CommsReliability, TorqueStress, CrossBusTeleop, MotorIsolation
+**When** I run `armos diagnose --active`
+**Then** all 4 active checks execute in sequence and produce a summary report
+**And** each check uses the `ServoProtocol` and `RobotProfile` interfaces (not hardcoded Feetech calls)
+
+**Given** I want to check only servo communication reliability
+**When** I run `armos diagnose --check comms`
 **Then** only the CommsReliability check executes
 
-**Size:** XL
-**Dependencies:** 4.1, 2.1, 2.2, 2.3, 3.1, 3.3
+**Size:** L
+**Dependencies:** 4.1, 2.1, 2.2, 2.3, 3.1, 3.3, 4.2a
 
 ---
 
@@ -515,15 +622,15 @@ So that I can read results in the terminal, feed them to Claude Code, or analyze
 **Acceptance Criteria:**
 
 **Given** a diagnostic run has completed
-**When** I run `robotos diagnose` (default)
+**When** I run `armos diagnose` (default)
 **Then** results are printed to the terminal with colored PASS/WARN/FAIL indicators using Rich
 
 **Given** a diagnostic run has completed
-**When** I run `robotos diagnose --json`
+**When** I run `armos diagnose --json`
 **Then** results are printed as valid JSON with `status`, `message`, and `data` fields per check
 
 **Given** a diagnostic run has completed
-**When** I run `robotos diagnose --log /path/to/output.csv`
+**When** I run `armos diagnose --log /path/to/output.csv`
 **Then** results are appended to a CSV file with timestamp, check name, status, and message columns
 
 **Size:** M
@@ -534,18 +641,18 @@ So that I can read results in the terminal, feed them to Claude Code, or analyze
 ### Story 4.4: Exercise Command Migration
 
 As a **user**,
-I want to run programmatic arm exercise routines via `robotos exercise`,
+I want to run programmatic arm exercise routines via `armos exercise`,
 So that I can verify mechanical health by moving each joint through its range.
 
 **Acceptance Criteria:**
 
 **Given** a calibrated SO-101 is connected
-**When** I run `robotos exercise --arm follower`
+**When** I run `armos exercise --arm follower`
 **Then** each joint moves through its calibrated range (min to max to center) at a safe speed
 **And** per-joint telemetry (voltage, load, temperature) is displayed during the exercise
 
 **Given** I want to exercise only one joint
-**When** I run `robotos exercise --arm follower --joint elbow_flex`
+**When** I run `armos exercise --arm follower --joint elbow_flex`
 **Then** only the elbow_flex joint is exercised
 
 **Size:** M
@@ -599,7 +706,7 @@ So that I can analyze servo behavior after a session for troubleshooting or rese
 **Then** each sample is written as a row: timestamp, arm, joint, position, voltage, current, load, temperature, error_flags
 **And** the CSV is flushed after each row (no data loss on crash)
 
-**Given** I run `robotos monitor --log /tmp/telemetry.csv`
+**Given** I run `armos monitor --log /tmp/telemetry.csv`
 **When** I monitor for 10 seconds at 10 Hz and then stop
 **Then** the CSV file contains approximately 10 * 10 * num_joints rows (one per sample per joint)
 
@@ -650,7 +757,7 @@ So that my robot's movements are accurately mapped.
 **Acceptance Criteria:**
 
 **Given** an SO-101 is connected and the profile is loaded
-**When** I run `robotos calibrate --arm follower`
+**When** I run `armos calibrate --arm follower`
 **Then** the system guides me through each joint: "Move shoulder_pan to its minimum position and press Enter"
 **And** after recording min/max for all joints, calibration data is saved to disk
 
@@ -659,7 +766,7 @@ So that my robot's movements are accurately mapped.
 **Then** the partially completed calibration is discarded with a message "Calibration cancelled. No data saved."
 
 **Given** a stored calibration already exists for this arm
-**When** I run `robotos calibrate --arm follower`
+**When** I run `armos calibrate --arm follower`
 **Then** the system warns "Existing calibration found (saved: 2026-03-15). Overwrite? [y/N]"
 
 **Size:** M
@@ -676,7 +783,7 @@ So that I can control my robot arm in real time.
 **Acceptance Criteria:**
 
 **Given** both leader and follower arms are connected, profiled, and calibrated
-**When** I run `robotos teleop`
+**When** I run `armos teleop`
 **Then** the system reads leader arm positions and writes them to the follower arm at 60 Hz (per SO-101 profile)
 **And** the system displays live telemetry (position, voltage, load) for both arms
 
@@ -686,11 +793,17 @@ So that I can control my robot arm in real time.
 **And** all follower servo torques are disabled
 
 **Given** teleoperation is running
+**When** the control loop stalls for more than 500ms (e.g., USB controller hang)
+**Then** the teleop watchdog fires and disables all follower torques immediately
+**And** the user is alerted: "WATCHDOG: control loop stalled >500ms, torque disabled for safety"
+
+**Given** teleoperation is running
 **When** I press Ctrl+C
 **Then** teleoperation stops gracefully, follower torques are disabled, and a session summary is printed (duration, max temps, max loads, error count)
 
 **Size:** L
 **Dependencies:** 2.1, 2.4, 3.1, 3.3, 5.1, 5.3
+**Implements:** FR15, FR17, FR42
 
 ---
 
@@ -715,21 +828,21 @@ So that I can detect developing problems before they cause a safety stop.
 ### Story 6.4: Hardware Detection Command
 
 As a **user**,
-I want to run `robotos detect` to see all connected USB-serial adapters and cameras with their identified types,
+I want to run `armos detect` to see all connected USB-serial adapters and cameras with their identified types,
 So that I can verify my hardware is recognized before starting calibration or teleop.
 
 **Acceptance Criteria:**
 
 **Given** a CH340 USB-serial adapter is connected
-**When** I run `robotos detect`
+**When** I run `armos detect`
 **Then** I see: "USB Serial: /dev/ttyUSB0 (CH340, vendor=1a86, product=7523) -- Feetech servo controller"
 
 **Given** a USB camera is connected
-**When** I run `robotos detect`
+**When** I run `armos detect`
 **Then** I see: "Camera: /dev/video0 (USB 2.0 Camera, 1920x1080@30fps, 640x480@60fps)"
 
 **Given** no USB devices are connected
-**When** I run `robotos detect`
+**When** I run `armos detect`
 **Then** I see: "No USB serial devices or cameras detected."
 
 **Size:** M
@@ -744,18 +857,50 @@ So that I can verify my hardware is recognized before starting calibration or te
 **Migration Phase:** D
 **Product Scope:** MVP (v0.1)
 
+### Story 7.0: First-Run Setup Wizard with Hardware Auto-Detection
+
+As a **first-time user**,
+I want a setup wizard that auto-detects my connected hardware and guides me through initial calibration on first boot,
+So that I can go from "USB plugged in" to "robot working" without reading documentation or typing terminal commands.
+
+**Acceptance Criteria:**
+
+**Given** the system has never been configured (no calibration files, no profile selection)
+**When** the TUI launches for the first time
+**Then** a first-run wizard starts automatically
+
+**Given** the wizard is running
+**When** hardware is detected (USB-serial adapters, servo buses, cameras)
+**Then** the wizard displays what was found and auto-selects the matching robot profile
+
+**Given** the wizard has identified the hardware
+**When** the user confirms the detected configuration
+**Then** the wizard launches the calibration workflow for each arm in sequence
+**And** on completion, the user is dropped into the main TUI dashboard ready for teleop
+
+**Given** the system has already been configured (calibration files exist)
+**When** the TUI launches
+**Then** the wizard is skipped and the main dashboard appears directly
+
+**Size:** L
+**Dependencies:** 7.1, 6.1, 6.4
+**Sprint:** 6
+**Implements:** FR43
+
+---
+
 ### Story 7.1: TUI Application Shell
 
 As a **user**,
-I want to launch `robotos tui` and see a terminal dashboard showing detected hardware, active profile, and calibration state,
+I want to launch `armos tui` and see a terminal dashboard showing detected hardware, active profile, and calibration state,
 So that I have a visual overview of my robot setup without memorizing CLI commands.
 
 **Acceptance Criteria:**
 
-**Given** the `robotos` package is installed with the `tui` extra
-**When** I run `robotos tui`
+**Given** the `armos` package is installed with the `tui` extra
+**When** I run `armos tui`
 **Then** a full-screen terminal application launches using `textual`
-**And** the header shows "RobotOS v0.1.0" and the detected robot profile name
+**And** the header shows "armOS v0.1.0" and the detected robot profile name
 **And** a status panel shows: connected arms, calibration state per arm, and any active faults
 
 **Given** no robot hardware is detected
@@ -818,33 +963,54 @@ So that I never need to open a terminal and type commands.
 
 ## Epic 8: Pre-built USB Image
 
-**Goal:** Create a bootable USB image using `live-build` that ships with the entire `robotos` package, LeRobot, all system dependencies, and the SO-101 profile pre-installed. Users flash and boot -- no install process.
+**Goal:** Create a bootable USB image using `live-build` that ships with the entire `armos` package, LeRobot, all system dependencies, and the SO-101 profile pre-installed. Users flash and boot -- no install process.
 
 **Migration Phase:** E
 **Product Scope:** MVP (v0.1)
 
-### Story 8.1: live-build Configuration and ISO Build Script
+### Story 8.1a: Live-Build Spike -- Minimal Bootable ISO
 
 As a **developer**,
-I want a `live-build` configuration that produces a bootable Ubuntu 24.04-based ISO with all RobotOS dependencies pre-installed,
+I want a minimal `live-build` configuration that produces a bootable Ubuntu 24.04-based ISO with Python 3.12 and a "hello world" armos package,
+So that we validate the live-build toolchain early and de-risk the full ISO build.
+
+**Acceptance Criteria:**
+
+**Given** the `armos-iso/` directory contains a minimal `live-build` configuration
+**When** I run the build script (e.g., `./build-iso.sh`)
+**Then** a bootable ISO is produced
+**And** the ISO boots to a desktop on a x86 UEFI system (or QEMU/KVM)
+**And** `python3.12 --version` works inside the booted image
+
+**Size:** M
+**Dependencies:** 1.1
+**Sprint:** 4
+
+---
+
+### Story 8.1b: Full Live-Build with All Packages
+
+As a **developer**,
+I want the full `live-build` configuration that produces a bootable Ubuntu 24.04-based ISO with all armOS dependencies pre-installed,
 So that the ISO can be built reproducibly in CI or locally.
 
 **Acceptance Criteria:**
 
-**Given** the `robotos-iso/` directory contains valid `live-build` configuration
+**Given** the `armos-iso/` directory contains the full `live-build` configuration
 **When** I run the build script (e.g., `./build-iso.sh`)
-**Then** a `robotos-0.1.0.iso` file is produced
+**Then** a `armos-0.1.0.iso` file is produced
 **And** the ISO boots to a desktop on a x86 UEFI system within 90 seconds (NFR5)
 **And** the ISO is under 16GB (NFR14)
 
 **Given** the ISO has booted
-**When** I open a terminal and run `robotos --version`
+**When** I open a terminal and run `armos --version`
 **Then** it prints `0.1.0`
 **And** `python3.12 -c "import lerobot; print(lerobot.__version__)"` prints `0.5.0`
-**And** the SO-101 profile is available via `robotos profile list`
+**And** the SO-101 profile is available via `armos profile list`
 
-**Size:** XL
-**Dependencies:** 1.1, 2.1, 3.2, 4.2, 5.1, 6.1, 6.2, 7.1
+**Size:** L
+**Dependencies:** 1.1, 2.1, 3.2, 4.2a, 5.1, 6.1, 6.2, 7.1, 8.1a
+**Sprint:** 6
 
 ---
 
@@ -875,13 +1041,13 @@ So that I never need to run system configuration commands.
 ### Story 8.3: Windows Flash Script Update
 
 As a **user**,
-I want to flash the RobotOS USB image from Windows using a single PowerShell command,
+I want to flash the armOS USB image from Windows using a single PowerShell command,
 So that I can prepare a bootable USB without needing Linux tools.
 
 **Acceptance Criteria:**
 
-**Given** I have downloaded `robotos-0.1.0.iso` on a Windows machine
-**When** I run `flash.ps1 -Image robotos-0.1.0.iso -Drive E:`
+**Given** I have downloaded `armos-0.1.0.iso` on a Windows machine
+**When** I run `flash.ps1 -Image armos-0.1.0.iso -Drive E:`
 **Then** the script writes the ISO to the USB drive
 **And** the USB drive is bootable on x86 UEFI hardware
 
@@ -908,13 +1074,33 @@ So that I have confidence it will boot on my machine.
 **And** at least 4 of 5 models boot successfully to the TUI
 
 **Size:** L
-**Dependencies:** 8.1, 8.2
+**Dependencies:** 8.1b, 8.2
+
+---
+
+### Story 8.5: Plymouth Boot Splash
+
+As a **user**,
+I want a branded Plymouth boot splash that hides Linux boot messages during startup,
+So that the boot experience looks polished and professional rather than showing a wall of systemd text.
+
+**Acceptance Criteria:**
+
+**Given** the ISO image includes a custom Plymouth theme
+**When** the system boots from USB
+**Then** a branded armOS splash screen is displayed instead of Linux boot messages
+**And** a progress indicator shows boot is progressing
+
+**Size:** S
+**Dependencies:** 8.1b
+**Sprint:** 6
+**Implements:** FR44
 
 ---
 
 ## Epic 9: AI Integration and Data Collection
 
-**Goal:** Integrate the LeRobot data collection pipeline into the `robotos` package and set up the Claude Code context for AI-assisted troubleshooting. Users can record teleop sessions as datasets and get AI help when things go wrong.
+**Goal:** Integrate the LeRobot data collection pipeline into the `armos` package and set up the Claude Code context for AI-assisted troubleshooting. Users can record teleop sessions as datasets and get AI help when things go wrong.
 
 **Migration Phase:** E
 **Product Scope:** MVP (v0.1)
@@ -928,10 +1114,10 @@ So that I can get AI-assisted troubleshooting without manual context setup.
 **Acceptance Criteria:**
 
 **Given** the USB image has booted
-**When** I launch Claude Code in the RobotOS project directory
-**Then** CLAUDE.md is present and describes all `robotos` CLI commands
+**When** I launch Claude Code in the armOS project directory
+**Then** CLAUDE.md is present and describes all `armos` CLI commands
 **And** memory files document known hardware issues (Feetech sync_read bug, brltty hijack, power supply requirements)
-**And** `robotos diagnose --json` output can be pasted to Claude for interpretation
+**And** `armos diagnose --json` output can be pasted to Claude for interpretation
 
 **Size:** S
 **Dependencies:** 1.5, 8.1
@@ -964,20 +1150,20 @@ So that I can record datasets without writing LeRobot config files manually.
 ### Story 9.3: Data Collection Command
 
 As a **user**,
-I want to record teleoperation sessions as LeRobot-compatible datasets via `robotos record`,
+I want to record teleoperation sessions as LeRobot-compatible datasets via `armos record`,
 So that I can collect training data for imitation learning.
 
 **Acceptance Criteria:**
 
 **Given** both arms are connected, calibrated, and cameras are detected
-**When** I run `robotos record --task pick_and_place --episodes 10`
+**When** I run `armos record --task pick_and_place --episodes 10`
 **Then** the system starts teleoperation and records servo positions + camera frames + timestamps
 **And** after each episode (user presses Enter to advance), the episode is saved to disk immediately (NFR8)
 
 **Given** 10 episodes have been recorded
 **When** the session completes
-**Then** the dataset is saved in LeRobot format at `~/.local/share/robotos/datasets/pick_and_place/`
-**And** `robotos record --list` shows the dataset with episode count and disk size
+**Then** the dataset is saved in LeRobot format at `~/.local/share/armos/datasets/pick_and_place/`
+**And** `armos record --list` shows the dataset with episode count and disk size
 
 **Given** a recording is in progress
 **When** the system encounters a transient servo error
@@ -990,7 +1176,7 @@ So that I can collect training data for imitation learning.
 
 ## Epic 10: Growth Phase -- Multi-Hardware and Polish
 
-**Goal:** Extend RobotOS beyond the SO-101 to support multiple robot platforms, servo protocols, and host hardware. Add the user-facing polish features (profile creation wizard, configurable teleop, episode review, image cloning, web dashboard foundations). This epic covers Growth (v0.5) and Vision (v1.0) scope items.
+**Goal:** Extend armOS beyond the SO-101 to support multiple robot platforms, servo protocols, and host hardware. Add the user-facing polish features (profile creation wizard, configurable teleop, episode review, image cloning, web dashboard foundations). This epic covers Growth (v0.5) and Vision (v1.0) scope items.
 
 **Migration Phase:** F
 **Product Scope:** Growth (v0.5) / Vision (v1.0)
@@ -1014,7 +1200,7 @@ So that I do not need to manually configure ports or select profiles.
 
 **Given** the detected hardware does not match any profile
 **When** detection completes
-**Then** the system reports "Unknown configuration: 4x Dynamixel XL330 servos. No matching profile. Use `robotos profile create` to define one."
+**Then** the system reports "Unknown configuration: 4x Dynamixel XL330 servos. No matching profile. Use `armos profile create` to define one."
 
 **Size:** L
 **Dependencies:** 2.1, 3.1, 6.4
@@ -1030,7 +1216,7 @@ So that the community can contribute hardware support without modifying core cod
 **Acceptance Criteria:**
 
 **Given** I create a file `dynamixel.py` implementing `DynamixelPlugin(ServoProtocol)` with all required methods
-**When** I place it in `robotos/hal/plugins/`
+**When** I place it in `armos/hal/plugins/`
 **Then** `ServoProtocol.get_plugin("dynamixel")` returns the plugin
 **And** all CLI commands work with the Dynamixel plugin (detect, calibrate, teleop, diagnose)
 
@@ -1048,21 +1234,21 @@ So that the community can contribute hardware support without modifying core cod
 
 As a **user**,
 I want to create a new robot profile through a guided workflow and export it for sharing,
-So that I can use RobotOS with custom hardware and share my configuration with others.
+So that I can use armOS with custom hardware and share my configuration with others.
 
 **Acceptance Criteria:**
 
 **Given** I have an unsupported robot configuration
-**When** I run `robotos profile create`
+**When** I run `armos profile create`
 **Then** the system guides me through: specifying arm count, joints per arm, servo IDs, joint names, position limits, and protection settings
-**And** the resulting profile is saved as a YAML file in `~/.config/robotos/profiles/`
+**And** the resulting profile is saved as a YAML file in `~/.config/armos/profiles/`
 
 **Given** I have a working profile
-**When** I run `robotos profile export my-robot --output my-robot.yaml`
-**Then** a standalone YAML file is created that can be imported on another RobotOS installation
+**When** I run `armos profile export my-robot --output my-robot.yaml`
+**Then** a standalone YAML file is created that can be imported on another armOS installation
 
 **Given** I received a profile YAML from someone else
-**When** I run `robotos profile import my-robot.yaml`
+**When** I run `armos profile import my-robot.yaml`
 **Then** the profile is validated, copied to the profiles directory, and available for use
 
 **Size:** L
@@ -1079,15 +1265,15 @@ So that I have full control over my data collection workflow.
 **Acceptance Criteria:**
 
 **Given** teleoperation is running
-**When** I have configured speed_scaling=0.5 in my profile or via `robotos teleop --speed 0.5`
+**When** I have configured speed_scaling=0.5 in my profile or via `armos teleop --speed 0.5`
 **Then** the follower arm moves at half the speed of the leader arm
 
 **Given** I have recorded datasets
-**When** I run `robotos record --review pick_and_place --episode 5`
+**When** I run `armos record --review pick_and_place --episode 5`
 **Then** the system replays episode 5, showing servo positions over time
 
 **Given** USB cameras are detected
-**When** I run `robotos monitor --cameras`
+**When** I run `armos monitor --cameras`
 **Then** camera device paths and capabilities are displayed
 
 **Size:** L
@@ -1103,17 +1289,17 @@ So that I can set up a classroom of identical robot stations quickly.
 
 **Acceptance Criteria:**
 
-**Given** I have a configured RobotOS USB drive with calibration data
-**When** I run `robotos image clone --target /dev/sdc`
+**Given** I have a configured armOS USB drive with calibration data
+**When** I run `armos image clone --target /dev/sdc`
 **Then** the entire USB drive (including persistent data) is cloned to the target
 **And** the cloned drive boots identically to the source
 
 **Given** I want to clone without user-specific data
-**When** I run `robotos image clone --clean --target /dev/sdc`
+**When** I run `armos image clone --clean --target /dev/sdc`
 **Then** the cloned drive has the base image with profiles but no calibration data or datasets
 
 **Size:** M
-**Dependencies:** 8.1, 8.2
+**Dependencies:** 8.1b, 8.2
 
 ---
 
@@ -1126,7 +1312,7 @@ So that I get context-aware diagnostic assistance without manually copying data.
 **Acceptance Criteria:**
 
 **Given** my robot is connected and has recent diagnostic results
-**When** I run `robotos ai-assist`
+**When** I run `armos ai-assist`
 **Then** the system writes a context file containing: detected hardware, active profile, last diagnostic results, recent telemetry alerts, and error logs
 **And** Claude Code is launched with this context file pre-loaded
 
@@ -1177,17 +1363,18 @@ Epic 1 (Package Skeleton)
 
 | Epic | Stories | S | M | L | XL | Total Weight* |
 |------|---------|---|---|---|----|----|
+| 0: Sprint 0 | 2 | 1 | 1 | 0 | 0 | 4 |
 | 1: Package Skeleton | 5 | 5 | 0 | 0 | 0 | 5 |
 | 2: HAL - Feetech | 4 | 0 | 3 | 1 | 0 | 12 |
-| 3: Profiles - SO-101 | 4 | 2 | 2 | 0 | 0 | 8 |
-| 4: Diagnostics | 4 | 0 | 3 | 0 | 1 | 17 |
+| 3: Profiles - SO-101 | 5 | 2 | 3 | 0 | 0 | 11 |
+| 4: Diagnostics | 5 | 0 | 3 | 2 | 0 | 19 |
 | 5: Telemetry | 3 | 1 | 1 | 1 | 0 | 7 |
 | 6: Calibration & Teleop | 4 | 0 | 3 | 1 | 0 | 12 |
-| 7: TUI Launcher | 3 | 0 | 2 | 1 | 0 | 9 |
-| 8: USB Image | 4 | 0 | 1 | 2 | 1 | 16 |
+| 7: TUI Launcher | 4 | 0 | 2 | 2 | 0 | 14 |
+| 8: USB Image | 6 | 2 | 2 | 2 | 0 | 18 |
 | 9: AI & Data | 3 | 1 | 1 | 1 | 0 | 7 |
 | 10: Growth | 6 | 0 | 2 | 4 | 0 | 18 |
-| **Total** | **40** | **9** | **18** | **11** | **2** | **111** |
+| **Total** | **47** | **12** | **21** | **14** | **0** | **127** |
 
 *Weight: S=1, M=3, L=5, XL=8
 
@@ -1201,7 +1388,7 @@ Epic 1 (Package Skeleton)
 | FR1 (all) | 10.1 | 10 | Growth |
 | FR2 | 2.2 | 2 | MVP |
 | FR3 | 10.1 | 10 | Growth |
-| FR4 | 6.4 | 6 | MVP |
+| FR4 | 3.5, 6.4 | 3, 6 | MVP |
 | FR5 | 10.1 | 10 | Growth |
 | FR6 | 8.2 | 8 | MVP |
 | FR7 | 3.1 | 3 | MVP |
@@ -1216,18 +1403,18 @@ Epic 1 (Package Skeleton)
 | FR16 | 6.3, 5.1 | 6, 5 | MVP |
 | FR17 | 6.2 | 6 | MVP |
 | FR18 | 10.4 | 10 | Growth |
-| FR19 | 4.1, 4.2 | 4 | MVP |
+| FR19 | 4.1, 4.2a, 4.2b | 4 | MVP |
 | FR20 | 5.1 | 5 | MVP |
 | FR21 | 5.2, 4.3 | 5, 4 | MVP |
 | FR22 | 4.4 | 4 | MVP |
-| FR23 | 5.3, 4.2 | 5, 4 | MVP |
+| FR23 | 5.3, 4.2a, 4.2b | 5, 4 | MVP |
 | FR24 | 9.3 | 9 | MVP |
 | FR25 | 9.3 | 9 | MVP |
 | FR26 | 10.4 | 10 | Growth |
 | FR27 | 9.3 | 9 | MVP |
-| FR28 | 8.1 | 8 | MVP |
+| FR28 | 8.1b | 8 | MVP |
 | FR29 | 8.2 | 8 | MVP |
-| FR30 | 8.1 | 8 | MVP |
+| FR30 | 8.1b | 8 | MVP |
 | FR31 | 8.3 | 8 | MVP |
 | FR32 | 10.5 | 10 | Growth |
 | FR33 | 7.1, 7.2 | 7 | MVP (TUI) |
@@ -1239,7 +1426,10 @@ Epic 1 (Package Skeleton)
 | FR39 | 2.1, 10.2 | 2, 10 | MVP (ABC), Growth (plugins) |
 | FR40 | 10.2 | 10 | Growth |
 | FR41 | 10.2 | 10 | Vision |
+| FR42 | 6.2 | 6 | MVP |
+| FR43 | 7.0 | 7 | MVP |
+| FR44 | 8.5 | 8 | MVP |
 
 ---
 
-_Epic breakdown for RobotOS USB -- a universal robot operating system on a bootable USB stick._
+_Epic breakdown for armOS USB -- a universal robot operating system on a bootable USB stick._

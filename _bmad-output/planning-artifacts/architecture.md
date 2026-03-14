@@ -1,4 +1,4 @@
-# RobotOS Technical Architecture
+# armOS Technical Architecture
 
 **Date:** 2026-03-15
 **Author:** Winston (Architect Agent)
@@ -29,7 +29,7 @@
 
 ## 1. Architecture Overview
 
-RobotOS is a bootable USB operating system purpose-built for robotics. It provides a
+armOS is a bootable USB operating system purpose-built for robotics. It provides a
 hardware abstraction layer, diagnostic framework, and AI integration pipeline that
 allows users to plug in supported robot hardware and have a working control station
 within minutes -- on any x86 machine.
@@ -40,7 +40,7 @@ within minutes -- on any x86 machine.
 +===================================================================+
 |                       USER INTERFACE LAYER                        |
 |  +-------------+  +-----------------+  +----------------------+  |
-|  | CLI (robotos|  | TUI (textual)   |  | Web Dashboard        |  |
+|  | CLI (armos|  | TUI (textual)   |  | Web Dashboard        |  |
 |  | detect, cal,|  | headless status |  | (FastAPI + htmx)     |  |
 |  | teleop, etc)|  | and control     |  | telemetry, control   |  |
 |  +-------------+  +-----------------+  +----------------------+  |
@@ -92,7 +92,7 @@ within minutes -- on any x86 machine.
                              | upload/download
                              |
 +----------+        +--------v---------+        +------------------+
-|  User    | <----> |    RobotOS       | <----> |  Robot Hardware   |
+|  User    | <----> |    armOS       | <----> |  Robot Hardware   |
 | (human)  |  UI    |  (USB-booted)    |  USB   | (servos, cameras, |
 +----------+        +------------------+  serial |  sensors)         |
                              |                   +------------------+
@@ -122,7 +122,7 @@ within minutes -- on any x86 machine.
 ### Decision: Pre-built Ubuntu ISO via live-build
 
 Rather than the current install-from-scratch approach (flash Ubuntu ISO, then run
-five phases of package installation), RobotOS ships as a pre-built custom ISO
+five phases of package installation), armOS ships as a pre-built custom ISO
 with all robotics packages baked in.
 
 ### Build Toolchain
@@ -136,28 +136,28 @@ that produce new ISO releases automatically.
 ### ISO Contents
 
 ```
-robotos-iso/
+armos-iso/
   auto/
     config                  # live-build auto-config
   config/
     package-lists/
-      robotos.list.chroot   # apt packages to include
+      armos.list.chroot   # apt packages to include
     includes.chroot/
       etc/
         udev/rules.d/
-          99-robotos-serial.rules    # Feetech, Dynamixel, FTDI permissions
-          99-robotos-cameras.rules   # USB camera permissions
+          99-armos-serial.rules    # Feetech, Dynamixel, FTDI permissions
+          99-armos-cameras.rules   # USB camera permissions
         skel/
-          .bashrc                     # robotos-env activation
+          .bashrc                     # armos-env activation
       opt/
-        robotos/                      # Pre-installed robotos package
+        armos/                      # Pre-installed armos package
       usr/
         share/
-          robotos/
+          armos/
             profiles/                 # Robot profile YAML files
     hooks/
       live/
-        0100-install-robotos.hook.chroot   # pip install robotos + lerobot
+        0100-install-armos.hook.chroot   # pip install armos + lerobot
         0200-configure-system.hook.chroot  # system tuning
 ```
 
@@ -173,7 +173,7 @@ robotos-iso/
   lb build
         |
         v
-  robotos-<version>.iso
+  armos-<version>.iso
         |
         v
   SHA256 checksum + release
@@ -185,16 +185,16 @@ robotos-iso/
 |-----------|--------------|
 | udev rules | Serial port auto-permissions for known USB-serial chips (CH340, FTDI, CP2102) |
 | brltty | Removed from image (it hijacks Feetech serial ports) |
-| Python 3.12 | System Python with venv at `/opt/robotos/env` |
+| Python 3.12 | System Python with venv at `/opt/armos/env` |
 | LeRobot | Pre-installed in the venv |
-| robotos package | Pre-installed in the venv |
+| armos package | Pre-installed in the venv |
 | dialout group | Default user added automatically |
-| systemd service | `robotos-detect.service` for USB hotplug detection |
+| systemd service | `armos-detect.service` for USB hotplug detection |
 | GRUB | Configured for USB boot with Surface kernel option |
 
 ### Kernel Strategy
 
-The base ISO ships with the standard Ubuntu kernel. An optional `robotos-kernels`
+The base ISO ships with the standard Ubuntu kernel. An optional `armos-kernels`
 meta-package provides:
 - `linux-image-surface` for Microsoft Surface devices
 - Standard kernel as fallback
@@ -285,6 +285,14 @@ class ServoProtocol(ABC):
     @abstractmethod
     def get_telemetry(self, servo_id: int) -> ServoTelemetry:
         """Read voltage, current, load, temperature, and error status."""
+
+    @abstractmethod
+    def sync_read_telemetry(self, servo_ids: list[int]) -> dict[int, ServoTelemetry]:
+        """Read telemetry from multiple servos in one transaction.
+
+        Reads contiguous register blocks (position through current) for all
+        specified servos in a single bus transaction. Essential for meeting
+        NFR1 latency targets -- avoids N round-trips for N servos."""
 
     @abstractmethod
     def read_register(self, servo_id: int, address: int, size: int) -> int:
@@ -418,15 +426,15 @@ Known USB-serial chips and their vendor/product IDs:
 
 ```
 # Feetech servo controllers (CH340)
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", MODE="0660", GROUP="robotos", \
-  SYMLINK+="robotos/servo%n", TAG+="robotos"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", MODE="0660", GROUP="armos", \
+  SYMLINK+="armos/servo%n", TAG+="armos"
 
 # Dynamixel U2D2 (FTDI)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", \
-  MODE="0660", GROUP="robotos", SYMLINK+="robotos/servo%n", TAG+="robotos"
+  MODE="0660", GROUP="armos", SYMLINK+="armos/servo%n", TAG+="armos"
 
 # USB cameras
-SUBSYSTEM=="video4linux", MODE="0660", GROUP="robotos", TAG+="robotos"
+SUBSYSTEM=="video4linux", MODE="0660", GROUP="armos", TAG+="armos"
 ```
 
 ---
@@ -436,7 +444,7 @@ SUBSYSTEM=="video4linux", MODE="0660", GROUP="robotos", TAG+="robotos"
 ### Profile Format (YAML)
 
 Each supported robot is described by a YAML profile. Profiles are stored in
-`/usr/share/robotos/profiles/` (shipped with ISO) and `~/.config/robotos/profiles/`
+`/usr/share/armos/profiles/` (shipped with ISO) and `~/.config/armos/profiles/`
 (user-created).
 
 ```yaml
@@ -521,7 +529,7 @@ firmware:
   update_requires: "Windows (Feetech debug software)"
 
 calibration:
-  storage_path: "~/.config/robotos/calibration/{instance_id}/"
+  storage_path: "~/.config/armos/calibration/{instance_id}/"
   format: "json"
   per_arm: true
 
@@ -552,7 +560,7 @@ A single profile (e.g., "SO-101") can have multiple physical instances. Each
 instance gets a unique ID derived from the USB serial number of its controller.
 
 ```
-~/.config/robotos/
+~/.config/armos/
   calibration/
     so101-CH340-SN12345/
       follower.json
@@ -682,7 +690,7 @@ class InfluxDBBackend(TelemetryBackend): ...  # Future: time-series database
 
 ### LeRobot Integration
 
-LeRobot remains the default AI framework. RobotOS wraps it with:
+LeRobot remains the default AI framework. armOS wraps it with:
 
 1. **Automatic patching** -- The sync_read retry and port flush patches are applied
    programmatically at import time (monkey-patching), eliminating the need to
@@ -697,11 +705,11 @@ LeRobot remains the default AI framework. RobotOS wraps it with:
 [Teleop Session]
       |
       v
-[robotos record]  -->  [HuggingFace Dataset format]
+[armos record]  -->  [HuggingFace Dataset format]
       |                          |
       v                          v
 [Local storage]           [hub upload]
-~/.config/robotos/        huggingface.co/datasets/
+~/.config/armos/        huggingface.co/datasets/
   datasets/               username/robot-dataset
 ```
 
@@ -714,10 +722,10 @@ integration points are:
 |------------|-----------|
 | Setup instructions | `CLAUDE.md` in repo root (already working) |
 | Context seeding | `setup.sh` copies memory files to Claude project dir |
-| Diagnostic interpretation | Claude reads `robotos diagnose --json` output |
+| Diagnostic interpretation | Claude reads `armos diagnose --json` output |
 | Hardware debugging | Claude reads telemetry logs and suggests fixes |
 
-No programmatic API between RobotOS and Claude Code -- the interaction is through
+No programmatic API between armOS and Claude Code -- the interaction is through
 files and CLI output that Claude Code can read and interpret.
 
 ---
@@ -730,20 +738,20 @@ All operations are available as CLI commands. The CLI is the single source of
 truth; TUI and web dashboard call the same underlying functions.
 
 ```
-robotos detect          # Scan USB devices, match to robot profiles
-robotos status          # Show connected hardware status
-robotos calibrate       # Run interactive calibration for detected robot
-robotos teleop          # Start leader-follower teleoperation
-robotos record          # Record a teleop session as a dataset
-robotos diagnose        # Run full diagnostic suite
-robotos diagnose --json # Machine-readable diagnostic output
-robotos monitor         # Live servo telemetry stream
-robotos exercise        # Programmatic arm movement stress test
-robotos config show     # Show current robot profile configuration
-robotos config edit     # Edit robot profile
-robotos profile list    # List available robot profiles
-robotos profile create  # Create a new robot profile interactively
-robotos serve           # Start the web dashboard
+armos detect          # Scan USB devices, match to robot profiles
+armos status          # Show connected hardware status
+armos calibrate       # Run interactive calibration for detected robot
+armos teleop          # Start leader-follower teleoperation
+armos record          # Record a teleop session as a dataset
+armos diagnose        # Run full diagnostic suite
+armos diagnose --json # Machine-readable diagnostic output
+armos monitor         # Live servo telemetry stream
+armos exercise        # Programmatic arm movement stress test
+armos config show     # Show current robot profile configuration
+armos config edit     # Edit robot profile
+armos profile list    # List available robot profiles
+armos profile create  # Create a new robot profile interactively
+armos serve           # Start the web dashboard
 ```
 
 Implementation: `click` library for CLI argument parsing.
@@ -753,7 +761,7 @@ Implementation: `click` library for CLI argument parsing.
 For SSH sessions and headless machines. Built with `textual` (Python TUI framework).
 
 ```
-+--[ RobotOS v1.0 ]--------------------------------------------+
++--[ armOS v1.0 ]--------------------------------------------+
 |                                                               |
 |  Hardware:  SO-101 (follower + leader)                        |
 |  Ports:     /dev/ttyACM0 (follower), /dev/ttyACM1 (leader)   |
@@ -782,7 +790,7 @@ For remote monitoring and multi-robot setups. Technology choices:
 - **Real-time:** WebSocket for telemetry streaming
 - **No external database required** -- reads from the same telemetry stream
 
-The web dashboard is started explicitly with `robotos serve` and binds to
+The web dashboard is started explicitly with `armos serve` and binds to
 `0.0.0.0:8080`. It is not auto-started.
 
 ---
@@ -792,22 +800,22 @@ The web dashboard is started explicitly with `robotos serve` and binds to
 ### Python Package Layout
 
 ```
-robotos/
+armos/
   __init__.py
-  __main__.py                  # python -m robotos
+  __main__.py                  # python -m armos
   cli/
     __init__.py
     main.py                    # click group, entry point
-    detect.py                  # robotos detect
-    calibrate.py               # robotos calibrate
-    teleop.py                  # robotos teleop
-    record.py                  # robotos record
-    diagnose.py                # robotos diagnose
-    monitor.py                 # robotos monitor
-    exercise.py                # robotos exercise
-    config.py                  # robotos config
-    profile.py                 # robotos profile
-    serve.py                   # robotos serve
+    detect.py                  # armos detect
+    calibrate.py               # armos calibrate
+    teleop.py                  # armos teleop
+    record.py                  # armos record
+    diagnose.py                # armos diagnose
+    monitor.py                 # armos monitor
+    exercise.py                # armos exercise
+    config.py                  # armos config
+    profile.py                 # armos profile
+    serve.py                   # armos serve
   hal/
     __init__.py
     protocol.py                # ServoProtocol ABC, ServoTelemetry dataclass
@@ -887,7 +895,7 @@ pyproject.toml                 # Package metadata, dependencies, entry points
 
 ```toml
 [project]
-name = "robotos"
+name = "armos"
 version = "0.1.0"
 description = "Universal robot operating system"
 requires-python = ">=3.12"
@@ -903,10 +911,10 @@ dependencies = [
 [project.optional-dependencies]
 tui = ["textual>=0.40"]
 web = ["fastapi>=0.100", "uvicorn>=0.20", "jinja2>=3.0", "websockets>=12.0"]
-all = ["robotos[tui,web]"]
+all = ["armos[tui,web]"]
 
 [project.scripts]
-robotos = "robotos.cli.main:cli"
+armos = "armos.cli.main:cli"
 ```
 
 ### Configuration Directories
@@ -915,12 +923,12 @@ Following XDG Base Directory Specification:
 
 | Path | Contents |
 |------|----------|
-| `/usr/share/robotos/profiles/` | System-wide robot profiles (shipped with ISO) |
-| `~/.config/robotos/profiles/` | User-created robot profiles |
-| `~/.config/robotos/calibration/` | Per-instance calibration data |
-| `~/.config/robotos/config.yaml` | User preferences (default profile, telemetry settings) |
-| `~/.local/share/robotos/datasets/` | Recorded datasets |
-| `~/.local/share/robotos/logs/` | Diagnostic and telemetry logs |
+| `/usr/share/armos/profiles/` | System-wide robot profiles (shipped with ISO) |
+| `~/.config/armos/profiles/` | User-created robot profiles |
+| `~/.config/armos/calibration/` | Per-instance calibration data |
+| `~/.config/armos/config.yaml` | User preferences (default profile, telemetry settings) |
+| `~/.local/share/armos/datasets/` | Recorded datasets |
+| `~/.local/share/armos/logs/` | Diagnostic and telemetry logs |
 
 ---
 
@@ -1041,10 +1049,27 @@ boundaries are defined explicitly to avoid GIL contention and integration issues
 blocking I/O on serial ports. This is the simplest model and matches pyserial's
 design.
 
-**Serial bus access** uses a dedicated reader thread per bus. The teleop loop runs
-on the main thread with serial reads/writes. Telemetry sampling runs on a separate
-`threading.Thread` (daemon) to avoid jitter in the control loop. A `threading.Lock`
-per serial port prevents concurrent access from teleop and telemetry threads.
+**Serial bus access** uses a **single bus thread per arm pair** that performs a
+coordinated read-write cycle, eliminating lock contention entirely:
+
+```
+Single Bus Thread (per arm pair):
+  loop at 60Hz:
+    1. sync_read leader positions
+    2. sync_read_telemetry follower (if telemetry subscribers exist)
+    3. sync_write follower goal positions
+    4. publish positions + telemetry to subscribers
+```
+
+The telemetry stream subscribes to data produced by this cycle rather than
+initiating its own reads. This guarantees deterministic cycle timing and avoids
+the jitter caused by lock contention between separate teleop and telemetry threads.
+
+**Teleop watchdog:** A deadline-based watchdog runs alongside the bus thread. If
+any teleop cycle exceeds a configurable deadline (default: 500ms), the watchdog
+fires and disables all follower torques immediately. This is a safety-critical
+component that prevents unsafe motion from stale commands (implements FR42). The
+watchdog uses a separate `threading.Timer` that is reset on each successful cycle.
 
 **GIL mitigation:** During active teleoperation, `gc.disable()` is called to prevent
 garbage collection pauses (which can spike to 10-20ms in CPython). Manual
@@ -1076,7 +1101,7 @@ Teleop loop          Serial I/O             Web dashboard
 
 ### ADR-1: Python as Primary Language
 
-**Context:** RobotOS needs to be accessible to the robotics hobbyist community.
+**Context:** armOS needs to be accessible to the robotics hobbyist community.
 
 **Decision:** Python 3.12+ as the primary language for all components.
 
@@ -1141,14 +1166,14 @@ calibration data (generated by code, consumed by code).
 
 **Context:** ROS2 is the industry standard for robotics middleware.
 
-**Decision:** RobotOS does not depend on ROS2. It provides its own lighter-weight
+**Decision:** armOS does not depend on ROS2. It provides its own lighter-weight
 abstraction.
 
 **Rationale:**
 - ROS2 adds ~2GB to the ISO and significant complexity
 - Target users are hobbyists who find ROS2 overwhelming
 - LeRobot does not use ROS2
-- A future `robotos-ros2-bridge` package can provide interop without making
+- A future `armos-ros2-bridge` package can provide interop without making
   it a core dependency
 
 **Trade-offs:**
@@ -1219,7 +1244,7 @@ Leader Arm                                            Follower Arm
 
 ```
 +-------------------+
-| robotos diagnose  |
+| armos diagnose  |
 +--------+----------+
          |
          v
@@ -1275,11 +1300,11 @@ USB Drive (64GB+)
   |     initrd.img-*
   |
   +-- casper/                 # Live filesystem (squashfs)
-  |     filesystem.squashfs   # Full OS with robotos pre-installed
+  |     filesystem.squashfs   # Full OS with armos pre-installed
   |     filesystem.manifest
   |
-  +-- robotos/                # Persistent partition (ext4, writable)
-        config/               # Symlinked to ~/.config/robotos
+  +-- armos/                # Persistent partition (ext4, writable)
+        config/               # Symlinked to ~/.config/armos
         calibration/          # Preserved across boots
         datasets/             # Recorded data
         logs/                 # Diagnostic/telemetry logs
@@ -1297,16 +1322,16 @@ Power on + boot from USB
         v
   GRUB menu (auto-select after 5s)
         |
-        +---> "RobotOS (standard kernel)" -- default for most hardware
+        +---> "armOS (standard kernel)" -- default for most hardware
         |
-        +---> "RobotOS (Surface kernel)"  -- for Surface Pro devices
+        +---> "armOS (Surface kernel)"  -- for Surface Pro devices
         |
         v
   systemd boot
         |
         v
-  robotos-detect.service starts
-        |  (IPC via Unix domain socket at /run/robotos/detect.sock --
+  armos-detect.service starts
+        |  (IPC via Unix domain socket at /run/armos/detect.sock --
         |   no TCP/IP listeners, compliant with NFR20)
         v
   Scan USB devices
@@ -1319,10 +1344,10 @@ Power on + boot from USB
   User logs in (auto-login, no password)
         |
         v
-  Desktop / terminal with robotos CLI available
+  Desktop / terminal with armos CLI available
         |
         v
-  "robotos status" shows detected hardware
+  "armos status" shows detected hardware
 ```
 
 ---
@@ -1331,7 +1356,7 @@ Power on + boot from USB
 
 ### Threat Model
 
-RobotOS is a local-only system for controlling physical robots. It is not
+armOS is a local-only system for controlling physical robots. It is not
 a server, not internet-facing, and not multi-user.
 
 | Concern | Mitigation |
@@ -1352,28 +1377,28 @@ dashboard on LAN, Claude Code) are all opt-in. No telemetry is collected.
 
 ## 15. Migration Path from Current Codebase
 
-The existing scripts are the seed for the RobotOS package. Here is how each
+The existing scripts are the seed for the armOS package. Here is how each
 existing file maps to the new architecture:
 
 | Current File | Becomes | Notes |
 |-------------|---------|-------|
-| `diagnose_arms.py` | `robotos/diagnostics/checks/*.py` | Split into individual check classes |
-| `monitor_arm.py` | `robotos/telemetry/stream.py` + `console_backend.py` | Generalized with pluggable backends |
-| `exercise_arm.py` | `robotos/cli/exercise.py` | Parameterized by profile |
-| `teleop_monitor.py` | `robotos/cli/teleop.py` | Uses HAL instead of direct FeetechMotorsBus |
+| `diagnose_arms.py` | `armos/diagnostics/checks/*.py` | Split into individual check classes |
+| `monitor_arm.py` | `armos/telemetry/stream.py` + `console_backend.py` | Generalized with pluggable backends |
+| `exercise_arm.py` | `armos/cli/exercise.py` | Parameterized by profile |
+| `teleop_monitor.py` | `armos/cli/teleop.py` | Uses HAL instead of direct FeetechMotorsBus |
 | `setup.sh` | ISO build hooks | No longer needed at runtime |
-| `CLAUDE.md` | Ships in ISO at `/opt/robotos/CLAUDE.md` | Updated for RobotOS commands |
+| `CLAUDE.md` | Ships in ISO at `/opt/armos/CLAUDE.md` | Updated for armOS commands |
 | `flash.ps1` | Replaced by ISO download + `dd`/Rufus | Simpler: just write the ISO |
 | Hardcoded ports (`/dev/ttyACM0`) | DeviceManager auto-detection | No more port guessing |
 | Hardcoded motor maps | Robot profile YAML | One source of truth |
-| Hardcoded calibration paths | `~/.config/robotos/calibration/` | XDG-compliant, per-instance |
-| LeRobot monkey-patches | `robotos/ai/lerobot_patches.py` | Applied at import time |
+| Hardcoded calibration paths | `~/.config/armos/calibration/` | XDG-compliant, per-instance |
+| LeRobot monkey-patches | `armos/ai/lerobot_patches.py` | Applied at import time |
 
 ### Migration Phases
 
-**Phase A: Package skeleton** (Epic 1) -- Create the `robotos` package with CLI entry points.
+**Phase A: Package skeleton** (Epic 1) -- Create the `armos` package with CLI entry points.
 Move existing scripts into the package structure. Everything still works, just
-invoked as `robotos diagnose` instead of `python diagnose_arms.py`.
+invoked as `armos diagnose` instead of `python diagnose_arms.py`.
 
 **Phase B: Hardware abstraction and profiles** (Epics 2, 3) -- Implement `ServoProtocol` and `FeetechPlugin`.
 Refactor diagnostic checks to use the protocol interface. Introduce robot profiles
@@ -1391,8 +1416,11 @@ Package everything into a bootable ISO. Integrate LeRobot data collection pipeli
 and Claude Code context files.
 
 **Phase F: Growth and polish** (Epic 10) -- Add multi-hardware support (Dynamixel, pyudev
-hotplug, profile wizard), web dashboard, and plugin architecture.
+hotplug, profile wizard), web dashboard, and plugin architecture. Integrate with
+visualization tools (Foxglove Studio, rerun.io) as telemetry export targets rather
+than building competing visualization -- armOS owns the "getting started" experience,
+not the "power user visualization" experience.
 
 ---
 
-*Architecture document for RobotOS USB -- a universal robot operating system on a USB stick.*
+*Architecture document for armOS USB -- a universal robot operating system on a USB stick.*

@@ -22,14 +22,14 @@ inputDocuments:
 workflowType: 'prd'
 ---
 
-# Product Requirements Document - RobotOS USB
+# Product Requirements Document - armOS USB
 
 **Author:** Bradley
 **Date:** 2026-03-15
 
 ## Executive Summary
 
-RobotOS USB transforms a bootable Linux USB stick into a universal robot operating system. Users plug the USB into any x86 computer, boot it, connect supported robotic hardware, and have a working robot control station in minutes -- no Linux expertise, no manual configuration, no internet required after first setup.
+armOS USB transforms a bootable Linux USB stick into a universal robot operating system. Users plug the USB into any x86 computer, boot it, connect supported robotic hardware, and have a working robot control station in minutes -- no Linux expertise, no manual configuration, no internet required after first setup.
 
 The project evolves from an existing single-purpose tool (Surface Pro 7 + SO-101 setup automation) into a hardware-agnostic robotics platform. It preserves the proven AI-driven setup pipeline (Claude Code + CLAUDE.md) and comprehensive servo diagnostic suite while adding hardware auto-detection, a universal robot API, and plug-and-play robot profiles.
 
@@ -39,7 +39,7 @@ The project evolves from an existing single-purpose tool (Surface Pro 7 + SO-101
 
 ## Success Criteria
 
-- **SC1:** A new user boots the USB on untested x86 hardware and reaches working robot teleoperation in under 5 minutes, measured from BIOS boot to first successful leader-follower movement.
+- **SC1:** A new user boots the USB on untested x86 hardware and reaches working robot teleoperation in under 5 minutes (excluding first-time calibration), measured from BIOS boot to first successful leader-follower movement with pre-existing calibration.
 - **SC2:** The system supports 3 or more robot arm platforms (SO-101, Koch v1.1, Aloha) with pre-configured profiles by v1.0 release.
 - **SC3:** The system supports 3 or more servo protocols (Feetech STS3215, Dynamixel XL330, Dynamixel XL430) by v1.0 release.
 - **SC4:** Zero manual terminal commands are required for basic operation (boot, detect hardware, calibrate, teleop, collect data) -- all accessible through a dashboard interface.
@@ -59,6 +59,7 @@ Harden the existing Surface Pro 7 + SO-101 pipeline into a reproducible, pre-bui
 - Existing diagnostic suite (diagnose_arms.py, monitor_arm.py, exercise_arm.py, teleop_monitor.py) accessible from a terminal menu
 - LeRobot v0.5.0 pre-installed with SO-101 profile
 - USB camera detection and V4L2 configuration
+- Data collection pipeline for recording LeRobot-compatible datasets (P0 -- critical for AI researcher persona)
 - Claude Code context files pre-seeded for AI-assisted troubleshooting
 
 ### Growth (v0.5) -- Multi-Hardware Support
@@ -89,10 +90,10 @@ Full platform with broad hardware support, community ecosystem, and zero-config 
 ### UJ1: First-Time Boot (Hobbyist)
 
 **Actor:** Robotics hobbyist with an SO-101 kit and a laptop.
-**Trigger:** User has flashed RobotOS USB and wants to control their robot.
+**Trigger:** User has flashed armOS USB and wants to control their robot.
 
 1. User inserts USB into laptop and boots from USB via BIOS boot menu.
-2. System boots to RobotOS desktop or dashboard within 90 seconds.
+2. System boots to armOS desktop or dashboard within 90 seconds.
 3. User connects SO-101 servo controller via USB.
 4. System detects Feetech CH340 USB-serial adapter, identifies it as a servo controller, and loads the Feetech STS3215 driver.
 5. System scans the servo bus, discovers 6 servos per arm, and matches the configuration to the SO-101 robot profile.
@@ -133,9 +134,9 @@ Full platform with broad hardware support, community ecosystem, and zero-config 
 ### UJ4: New Robot Platform (Maker)
 
 **Actor:** Maker who built a custom 4-DOF arm using Dynamixel XL330 servos.
-**Trigger:** User wants to use RobotOS with unsupported hardware.
+**Trigger:** User wants to use armOS with unsupported hardware.
 
-1. User boots RobotOS and connects Dynamixel U2D2 USB adapter.
+1. User boots armOS and connects Dynamixel U2D2 USB adapter.
 2. System detects U2D2, identifies Dynamixel protocol, scans bus and finds 4 servos.
 3. System reports: "Unknown robot configuration: 4x Dynamixel XL330 servos. No matching profile found."
 4. User selects "Create Profile." System launches guided profile creation.
@@ -150,7 +151,7 @@ Full platform with broad hardware support, community ecosystem, and zero-config 
 **Actor:** Teacher setting up 10 robot stations for a robotics class.
 **Trigger:** Beginning of semester, 10 identical SO-101 kits, 10 different laptops.
 
-1. Teacher creates one RobotOS USB with pre-configured SO-101 profile and calibration.
+1. Teacher creates one armOS USB with pre-configured SO-101 profile and calibration.
 2. Teacher clones the USB image to 9 additional USB sticks.
 3. Students insert USBs into their laptops (mixed Dell, HP, Lenovo hardware) and boot.
 4. Each station auto-detects the connected SO-101 and applies the pre-loaded profile.
@@ -210,7 +211,7 @@ Camera 1---1 USB Port (auto-detected)
 
 - **FR7:** The system can load robot profiles from YAML files that describe arm configurations, joint names, position limits, protection settings, and camera assignments.
 - **FR8:** Users can create new robot profiles through a guided workflow that captures joint count, naming, limits, and default settings.
-- **FR9:** Users can export and import robot profiles as standalone files for sharing across RobotOS installations.
+- **FR9:** Users can export and import robot profiles as standalone files for sharing across armOS installations.
 - **FR10:** The system ships with pre-built profiles for SO-101 (Feetech STS3215, 2x 6-DOF arms, leader-follower).
 - **FR11:** The system can apply protection settings from a profile to all servos on the bus (max temperature, max voltage, overload threshold, overload duration).
 
@@ -267,6 +268,9 @@ Camera 1---1 USB Port (auto-detected)
 - **FR39:** Developers can add support for new servo protocols by implementing a defined driver interface without modifying core system code.
 - **FR40:** Developers can add new robot profiles by creating YAML files conforming to the profile schema, without modifying core system code.
 - **FR41:** The system can load third-party profiles and drivers from a designated plugin directory.
+- **FR42:** The teleop watchdog shall disable follower torque if the control loop stalls for more than 500ms, preventing unsafe motion from stale commands.
+- **FR43:** A first-run setup wizard shall auto-detect connected hardware and guide the user through initial calibration on first boot.
+- **FR44:** A Plymouth boot splash shall hide Linux boot messages, presenting a branded boot screen to the user.
 
 ### FR Dependency Chain
 
@@ -299,7 +303,7 @@ Additional dependency links:
 
 ### Reliability
 
-- **NFR6:** The system shall recover from transient servo communication failures (single dropped packet) without interrupting teleoperation, using automatic retry with a maximum of 3 attempts per read cycle.
+- **NFR6:** The system shall recover from transient servo communication failures (single dropped packet) without interrupting teleoperation, using automatic retry with up to 10 retries per read cycle (proven working value from teleop patches).
 - **NFR7:** The system shall detect and report servo bus disconnection within 2 seconds, as measured from physical disconnection to dashboard alert.
 - **NFR8:** Data collection sessions shall not lose recorded episodes due to system errors -- each episode shall be flushed to disk before the next begins.
 - **NFR9:** The system shall survive unexpected power loss without corrupting the USB filesystem, using journaling or copy-on-write filesystem strategies.
@@ -326,7 +330,7 @@ Additional dependency links:
 ### Security
 
 - **NFR20:** The system shall not require or enable network services by default. No listening ports shall be open on a fresh boot.
-- **NFR21:** Servo bus access shall be restricted to the `robotos` group via udev rules using `MODE="0660"` and `GROUP="robotos"`. The default RobotOS user shall be a member of the `robotos` group. No world-writable serial device nodes.
+- **NFR21:** Servo bus access shall be restricted to the `armos` group via udev rules using `MODE="0660"` and `GROUP="armos"`. The default armOS user shall be a member of the `armos` group. No world-writable serial device nodes.
 - **NFR22:** The AI troubleshooting context shall not contain or transmit user data beyond the local machine without explicit user action (e.g., manual upload to HuggingFace Hub).
 
 ## Technical Constraints
@@ -335,10 +339,10 @@ Additional dependency links:
 - **TC2: USB boot required.** The system must boot and operate entirely from a USB drive. Hard drive installation is optional, never required.
 - **TC3: Offline operation.** After initial USB creation, all core functionality must work without internet. Internet is optional for AI assistant features and dataset upload.
 - **TC4: Python-based.** The robot API, diagnostic tools, and dashboard must be implemented in Python for maximum community accessibility. System-level components (boot, udev) may use bash.
-- **TC5: LeRobot compatibility.** The universal robot API must remain compatible with LeRobot v0.5.0+ data formats and collection pipelines. RobotOS is a platform for LeRobot, not a replacement.
+- **TC5: LeRobot compatibility.** The universal robot API must remain compatible with LeRobot v0.5.0+ data formats and collection pipelines. armOS is a platform for LeRobot, not a replacement.
 - **TC6: Open source.** All components must be open source. No proprietary dependencies for core functionality. Claude Code integration is optional (AI-assisted troubleshooting is a convenience, not a requirement).
 - **TC7: x86_64 only.** ARM support (Raspberry Pi, Jetson) is out of scope for v1.0. The USB boot architecture targets x86_64 UEFI systems.
-- **TC8: Single-user system.** RobotOS runs as a single-user desktop OS on the host machine. Multi-user, networked, or remote operation is out of scope for v1.0.
+- **TC8: Single-user system.** armOS runs as a single-user desktop OS on the host machine. Multi-user, networked, or remote operation is out of scope for v1.0.
 
 ## MVP Scope vs Future Phases
 
@@ -377,7 +381,7 @@ Note: FR3 is limited to single-profile matching (SO-101 only) in MVP; full multi
 
 | Metric | Target | Measurement Method | Traces To |
 |--------|--------|--------------------|-----------|
-| Time to first teleop (new user, known hardware) | Under 5 minutes | Timed user test from USB boot to first leader-follower movement | SC1 |
+| Time to first teleop (new user, known hardware, pre-calibrated) | Under 5 minutes | Timed user test from USB boot to first leader-follower movement (excludes first-time calibration) | SC1 |
 | Supported robot platforms | 3+ by v1.0 | Count of shipped, tested profiles | SC2 |
 | Supported servo protocols | 3+ by v1.0 | Count of implemented, tested protocol drivers | SC3 |
 | Terminal commands for basic operation | 0 | User test: complete calibrate + teleop workflow without terminal | SC4 |
@@ -388,4 +392,4 @@ Note: FR3 is limited to single-profile matching (SO-101 only) in MVP; full multi
 
 ---
 
-_Product Requirements Document for RobotOS USB -- a universal robot operating system on a bootable USB stick._
+_Product Requirements Document for armOS USB -- a universal robot operating system on a bootable USB stick._

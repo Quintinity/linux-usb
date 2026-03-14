@@ -1,6 +1,6 @@
 # generated: 2026-03-15
 # last_updated: 2026-03-15
-# project: linux-usb
+# project: linux-usb (armOS)
 # project_key: NOKEY
 # tracking_system: file-system
 # story_location: _bmad-output/implementation-artifacts
@@ -13,8 +13,8 @@
 #   - done: All stories in epic completed
 #
 # Epic Status Transitions:
-#   - backlog → in-progress: Automatically when first story is created (via create-story)
-#   - in-progress → done: Manually when all stories reach 'done' status
+#   - backlog -> in-progress: Automatically when first story is created (via create-story)
+#   - in-progress -> done: Manually when all stories reach 'done' status
 #
 # Story Status:
 #   - backlog: Story only exists in epic file
@@ -42,6 +42,15 @@ tracking_system: file-system
 story_location: "_bmad-output/implementation-artifacts"
 
 development_status:
+  # ============================================
+  # Epic 0: Sprint 0 -- Tooling and Environment Setup
+  # Sprint 0
+  # ============================================
+  epic-0: backlog
+  0-1-ci-cd-test-fixtures-mockservoprotocol-code-quality-tooling: backlog
+  0-2-hardware-inventory-and-test-environment-setup: backlog
+  epic-0-retrospective: optional
+
   # ============================================
   # Epic 1: Package Skeleton and CLI Foundation
   # Sprint 1
@@ -74,22 +83,24 @@ development_status:
   3-2-built-in-so-101-profile: backlog
   3-3-calibration-storage-and-recall: backlog
   3-4-calibration-validation: backlog
+  3-5-camera-auto-detection-and-cameramanager-integration: backlog
   epic-3-retrospective: optional
 
   # ============================================
   # Epic 4: Diagnostic Framework Refactor
-  # Sprint 4
+  # Sprint 4a/4b
   # ============================================
   epic-4: backlog
   4-1-diagnosticrunner-and-healthcheck-interface: backlog
-  4-2-migrate-existing-diagnostic-checks: backlog
+  4-2a-migrate-read-only-diagnostic-checks: backlog
+  4-2b-migrate-active-diagnostic-checks: backlog
   4-3-diagnostic-output-reporters: backlog
   4-4-exercise-command-migration: backlog
   epic-4-retrospective: optional
 
   # ============================================
   # Epic 5: Telemetry and Monitoring Library
-  # Sprint 4
+  # Sprint 4a/4b
   # ============================================
   epic-5: backlog
   5-1-telemetrystream-with-pluggable-backends: backlog
@@ -110,9 +121,10 @@ development_status:
 
   # ============================================
   # Epic 7: TUI Launcher
-  # Sprint 6
+  # Sprint 6a
   # ============================================
   epic-7: backlog
+  7-0-first-run-setup-wizard-with-hardware-auto-detection: backlog
   7-1-tui-application-shell: backlog
   7-2-live-telemetry-panel: backlog
   7-3-workflow-launcher-panel: backlog
@@ -120,18 +132,20 @@ development_status:
 
   # ============================================
   # Epic 8: Pre-built USB Image
-  # Sprint 6
+  # Sprint 4a (spike), Sprint 6b (full build), Sprint 7 (testing)
   # ============================================
   epic-8: backlog
-  8-1-live-build-configuration-and-iso-build-script: backlog
+  8-1a-live-build-spike-minimal-bootable-iso: backlog
+  8-1b-full-live-build-with-all-packages: backlog
   8-2-system-configuration-baked-into-image: backlog
   8-3-windows-flash-script-update: backlog
   8-4-hardware-compatibility-testing: backlog
+  8-5-plymouth-boot-splash: backlog
   epic-8-retrospective: optional
 
   # ============================================
   # Epic 9: AI Integration and Data Collection
-  # Sprint 6
+  # Sprint 6a/6b
   # ============================================
   epic-9: backlog
   9-1-claude-code-context-pre-seeding: backlog
