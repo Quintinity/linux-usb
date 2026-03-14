@@ -12,11 +12,21 @@ echo -e "${CYAN}Getting Claude Code running on this machine${NC}"
 echo ""
 
 # Step 1: Install basic dependencies
-echo -e "${YELLOW}[1/4] Installing git and curl...${NC}"
+echo -e "${YELLOW}[1/5] Installing git and curl...${NC}"
 sudo apt update && sudo apt install -y git curl
 
+# Step 1b: Grant passwordless sudo so Claude Code can run sudo commands autonomously
+echo -e "${YELLOW}[1b/4] Configuring passwordless sudo for $USER...${NC}"
+SUDOERS_FILE="/etc/sudoers.d/${USER}-nopasswd"
+if [ ! -f "$SUDOERS_FILE" ]; then
+    echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee "$SUDOERS_FILE" > /dev/null
+    echo -e "${GREEN}Passwordless sudo configured.${NC}"
+else
+    echo -e "${GREEN}Passwordless sudo already configured, skipping.${NC}"
+fi
+
 # Step 2: Install Claude Code
-echo -e "${YELLOW}[2/4] Installing Claude Code...${NC}"
+echo -e "${YELLOW}[3/5] Installing Claude Code...${NC}"
 if command -v claude &>/dev/null; then
     echo -e "${GREEN}Claude Code already installed, skipping.${NC}"
 else
@@ -25,7 +35,7 @@ else
 fi
 
 # Step 3: Copy Claude context files
-echo -e "${YELLOW}[3/4] Setting up Claude context...${NC}"
+echo -e "${YELLOW}[4/5] Setting up Claude context...${NC}"
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Build the project memory path: ~/.claude/projects/<repo-path-with-dashes>/memory/
@@ -48,7 +58,7 @@ else
     echo -e "${YELLOW}No claude-context/CLAUDE.md found, skipping.${NC}"
 fi
 
-# Step 4: Next steps
+# Step 5: Next steps
 echo ""
 echo -e "${GREEN}=== Bootstrap complete! ===${NC}"
 echo ""

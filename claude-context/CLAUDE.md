@@ -33,17 +33,10 @@ Do NOT proceed to Phase 2 until the user returns after rebooting.
 Install all required system dependencies:
 
 ```bash
-sudo apt update && sudo apt install -y \
-  build-essential cmake pkg-config ninja-build \
-  python3.12-dev python3.12-venv python3-pip \
-  git curl wget ffmpeg \
-  libglib2.0-0 libegl1-mesa-dev libgl1 \
-  libusb-1.0-0-dev \
-  libavformat-dev libavcodec-dev libavdevice-dev libavutil-dev \
-  libswscale-dev libswresample-dev libavfilter-dev \
-  libgeos-dev portaudio19-dev speech-dispatcher \
-  v4l-utils intel-microcode linux-firmware
+sudo apt update && sudo apt install -y build-essential cmake pkg-config ninja-build python3.12-dev python3.12-venv python3-pip git curl wget ffmpeg libglib2.0-0 libegl1-mesa-dev libgl1 libusb-1.0-0-dev libavformat-dev libavcodec-dev libavdevice-dev libavutil-dev libswscale-dev libswresample-dev libavfilter-dev libgeos-dev portaudio19-dev speech-dispatcher v4l-utils intel-microcode linux-firmware
 ```
+
+**Note:** Keep this as a single line. Backslash line continuations break when the terminal wraps long lines.
 
 **Verify:**
 ```bash
@@ -113,3 +106,25 @@ Report results to the user. If all pass, setup is complete.
 - **Python virtual environment** is at `~/lerobot-env`. Always activate it before running LeRobot commands.
 - **USB ports:** 1x USB-A, 1x USB-C. A multi-port adapter is available for connecting multiple devices (cameras + servo controller).
 - **Keyboard:** USB wireless keyboard (the Type Cover works after linux-surface kernel is installed).
+
+---
+
+## Lessons Learned (2026-03-14)
+
+### Terminal line wrapping breaks multi-line bash commands
+Long `apt install` commands using backslash continuations (`\`) break when the terminal wraps mid-line — the shell interprets the next line as a new command, causing package names to be run as commands and silently skipped. **Fix:** always write long apt install lines as a single unbroken line.
+
+### Claude Code needs passwordless sudo to run commands autonomously
+Without a NOPASSWD sudoers entry, Claude Code cannot run `sudo` commands — it has no terminal to enter a password. This forced the user to manually run every sudo command during Phase 2. **Fix:** `setup.sh` now adds the NOPASSWD entry before launching Claude, so all subsequent phases run unattended.
+
+### Split long installs into logical groups if debugging
+If running commands manually in a narrow terminal, split apt installs into thematic groups (build tools, Python, AV libs, etc.) rather than one giant command — easier to diagnose failures.
+
+---
+
+## Improvements for Next Install
+
+- [x] Add NOPASSWD sudoers entry to `setup.sh` before launching Claude (eliminates all manual sudo steps)
+- [x] Replace backslash-continuation apt commands with single-line versions
+- [ ] Consider a `phase2.sh` script that can be run directly, bypassing terminal width issues entirely
+- [ ] Add `sudo apt-get -y upgrade` after `apt update` in Phase 2 to pull in security patches on first boot
