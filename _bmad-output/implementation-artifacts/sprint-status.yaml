@@ -1,0 +1,153 @@
+# generated: 2026-03-15
+# last_updated: 2026-03-15
+# project: linux-usb
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - SM typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-03-15
+last_updated: 2026-03-15
+project: linux-usb
+project_key: NOKEY
+tracking_system: file-system
+story_location: "_bmad-output/implementation-artifacts"
+
+development_status:
+  # ============================================
+  # Epic 1: Package Skeleton and CLI Foundation
+  # Sprint 1
+  # ============================================
+  epic-1: backlog
+  1-1-initialize-python-package-with-pyproject-toml: backlog
+  1-2-cli-command-group-structure: backlog
+  1-3-utility-module-serial-helpers: backlog
+  1-4-utility-module-xdg-config-paths: backlog
+  1-5-migrate-claude-md-and-ai-context-files: backlog
+  epic-1-retrospective: optional
+
+  # ============================================
+  # Epic 2: Hardware Abstraction Layer -- Feetech
+  # Sprint 2
+  # ============================================
+  epic-2: backlog
+  2-1-servoprotocol-abc-and-feetechplugin: backlog
+  2-2-servo-bus-scan: backlog
+  2-3-protection-settings-read-write: backlog
+  2-4-resilient-communication-with-retry-and-port-flush: backlog
+  epic-2-retrospective: optional
+
+  # ============================================
+  # Epic 3: Robot Profile System -- SO-101
+  # Sprint 3
+  # ============================================
+  epic-3: backlog
+  3-1-profile-schema-and-loader: backlog
+  3-2-built-in-so-101-profile: backlog
+  3-3-calibration-storage-and-recall: backlog
+  3-4-calibration-validation: backlog
+  epic-3-retrospective: optional
+
+  # ============================================
+  # Epic 4: Diagnostic Framework Refactor
+  # Sprint 4
+  # ============================================
+  epic-4: backlog
+  4-1-diagnosticrunner-and-healthcheck-interface: backlog
+  4-2-migrate-existing-diagnostic-checks: backlog
+  4-3-diagnostic-output-reporters: backlog
+  4-4-exercise-command-migration: backlog
+  epic-4-retrospective: optional
+
+  # ============================================
+  # Epic 5: Telemetry and Monitoring Library
+  # Sprint 4
+  # ============================================
+  epic-5: backlog
+  5-1-telemetrystream-with-pluggable-backends: backlog
+  5-2-csv-logging-backend: backlog
+  5-3-fault-detection-and-alert-system: backlog
+  epic-5-retrospective: optional
+
+  # ============================================
+  # Epic 6: Calibration and Teleop CLI
+  # Sprint 5
+  # ============================================
+  epic-6: backlog
+  6-1-interactive-calibration-command: backlog
+  6-2-leader-follower-teleoperation-command: backlog
+  6-3-teleop-monitor-overlay: backlog
+  6-4-hardware-detection-command: backlog
+  epic-6-retrospective: optional
+
+  # ============================================
+  # Epic 7: TUI Launcher
+  # Sprint 6
+  # ============================================
+  epic-7: backlog
+  7-1-tui-application-shell: backlog
+  7-2-live-telemetry-panel: backlog
+  7-3-workflow-launcher-panel: backlog
+  epic-7-retrospective: optional
+
+  # ============================================
+  # Epic 8: Pre-built USB Image
+  # Sprint 6
+  # ============================================
+  epic-8: backlog
+  8-1-live-build-configuration-and-iso-build-script: backlog
+  8-2-system-configuration-baked-into-image: backlog
+  8-3-windows-flash-script-update: backlog
+  8-4-hardware-compatibility-testing: backlog
+  epic-8-retrospective: optional
+
+  # ============================================
+  # Epic 9: AI Integration and Data Collection
+  # Sprint 6
+  # ============================================
+  epic-9: backlog
+  9-1-claude-code-context-pre-seeding: backlog
+  9-2-lerobot-bridge-profile-to-config-translation: backlog
+  9-3-data-collection-command: backlog
+  epic-9-retrospective: optional
+
+  # ============================================
+  # Epic 10: Growth Phase -- Multi-Hardware and Polish
+  # Backlog (post-MVP)
+  # ============================================
+  epic-10: backlog
+  10-1-devicemanager-pyudev-hotplug-and-profile-matching: backlog
+  10-2-plugin-architecture-for-servo-protocols: backlog
+  10-3-profile-creation-wizard-and-export-import: backlog
+  10-4-configurable-teleop-episode-review-and-camera-feeds: backlog
+  10-5-usb-image-cloning-for-fleet-deployment: backlog
+  10-6-ai-troubleshooting-with-live-system-state: backlog
+  epic-10-retrospective: optional
