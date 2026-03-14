@@ -38,7 +38,7 @@ function Write-Err([string]$msg) {
 
 function Get-FileIfMissing([string]$Url, [string]$Dest, [string]$Label) {
     if (Test-Path $Dest) {
-        Write-Ok "$Label already exists — skipping download."
+        Write-Ok "$Label already exists - skipping download."
     } else {
         Write-Step "Downloading $Label ..."
         Write-Host "    Source: $Url"
@@ -109,11 +109,11 @@ Write-Host "  ISO path: $IsoFile" -ForegroundColor Gray
 Write-Host ''
 
 # 7. Launch Rufus
-Write-Step 'Launching Rufus — configure and flash, then close when done ...'
+Write-Step 'Launching Rufus - configure and flash, then close when done ...'
 Start-Process -FilePath $RufusFile -Wait
 
 # 8. Done
 Write-Host ''
 Write-Host '============================================' -ForegroundColor Green
-Write-Host '  Done — follow docs/BOOT-GUIDE.md' -ForegroundColor Green
+Write-Host '  Done - follow docs/BOOT-GUIDE.md' -ForegroundColor Green
 Write-Host '============================================' -ForegroundColor Green
