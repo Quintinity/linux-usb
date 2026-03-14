@@ -133,8 +133,8 @@ Double-check:
 Once booted into the installed Ubuntu system:
 
 ```bash
-git clone https://github.com/<your-username>/linux-usb.git
-cd linux-usb
+git clone https://github.com/Quintinity/linux-usb.git ~/linux-usb
+cd ~/linux-usb
 chmod +x setup.sh
 ./setup.sh
 ```
