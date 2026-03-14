@@ -29,7 +29,7 @@ echo -e "${YELLOW}[3/4] Setting up Claude context...${NC}"
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Build the project memory path: ~/.claude/projects/<repo-path-with-dashes>/memory/
-REPO_PATH_DASHED="$(echo "$REPO_DIR" | sed 's|^/||; s|/|-|g')"
+REPO_PATH_DASHED="$(echo "$REPO_DIR" | sed 's|^/||; s|/|--|g')"
 MEMORY_DIR="$HOME/.claude/projects/${REPO_PATH_DASHED}/memory"
 
 mkdir -p "$MEMORY_DIR"

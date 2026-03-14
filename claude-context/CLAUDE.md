@@ -37,7 +37,7 @@ sudo apt update && sudo apt install -y \
   build-essential cmake pkg-config ninja-build \
   python3.12-dev python3.12-venv python3-pip \
   git curl wget ffmpeg \
-  libglib2.0-0 libegl1-mesa-dev libgl1-mesa-glx \
+  libglib2.0-0 libegl1-mesa-dev libgl1 \
   libusb-1.0-0-dev \
   libavformat-dev libavcodec-dev libavdevice-dev libavutil-dev \
   libswscale-dev libswresample-dev libavfilter-dev \

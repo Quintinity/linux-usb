@@ -133,6 +133,7 @@ Double-check:
 Once booted into the installed Ubuntu system:
 
 ```bash
+sudo apt update && sudo apt install -y git
 git clone https://github.com/Quintinity/linux-usb.git ~/linux-usb
 cd ~/linux-usb
 chmod +x setup.sh
