@@ -141,10 +141,10 @@ DEPS
     info "Verifying deployment..."
     remote bash <<'VERIFY'
         source ~/lerobot-env/bin/activate
-        cd ~/citizenry
+        cd ~
         python -c "
 import importlib
-for mod in ['citizenry', 'citizenry.pi_citizen', 'citizenry.protocol', 'citizenry.transport']:
+for mod in ['citizenry', 'citizenry.pi_citizen', 'citizenry.protocol', 'citizenry.transport', 'citizenry.marketplace', 'citizenry.skills']:
     importlib.import_module(mod)
     print(f'  OK: {mod}')
 print('All imports succeeded')
