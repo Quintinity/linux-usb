@@ -2,15 +2,15 @@
 
 **Author:** Bob (Scrum Master Agent)
 **Date:** 2026-03-15
-**Status:** Consolidated v2.0
-**Scope:** MVP (v0.1) Sprints 0-7, Launch Sprint 8, Post-Launch Sprint 9
+**Status:** Consolidated v2.1
+**Scope:** MVP (v0.1) Sprints 0-6b, CI/CD + Testing Sprint 7, Launch Sprint 8, Post-Launch Sprint 9
 **Sprint Duration:** 2 weeks each (Sprint 0 is 1 week)
 
 ---
 
 ## Sprint Goal
 
-Build the `armos` Python package with a hardware abstraction layer, robot profiles, diagnostics, telemetry, calibration, teleoperation, a TUI launcher with demo mode, a pre-built USB image with CI/CD pipeline, and AI-assisted data collection -- delivering a complete MVP for the SO-101 robot on x86 hardware. Then execute a public launch and stabilize based on community feedback.
+Build the `armos` Python package with a hardware abstraction layer, robot profiles, diagnostics, telemetry, calibration, teleoperation, a TUI launcher with demo mode, a pre-built USB image with CI/CD pipeline, and AI-assisted data collection -- delivering a complete MVP for the SO-101 robot on x86 hardware. Then execute a public launch and stabilize based on community feedback. **20 weeks to public launch.**
 
 ---
 
@@ -191,14 +191,14 @@ Build the `armos` Python package with a hardware abstraction layer, robot profil
 - Submit upstream patches to LeRobot (Sprint 5-6)
 
 **Content:**
-- Week 9: 30-second teaser: "armOS first teleop" -- X, YouTube Shorts
-- Week 10: "Leader-follower teleoperation from scratch" (tutorial) -- YouTube, Blog
+- Week 11: 30-second teaser: "armOS first teleop" -- X, YouTube Shorts
+- Week 12: "Leader-follower teleoperation from scratch" (tutorial) -- YouTube, Blog
 
 ---
 
-### Sprint 6a: TUI + Data Collection (Weeks 13-14)
+### Sprint 6a: TUI + Data Collection + Demo Mode (Weeks 13-14)
 
-**Goal:** Build the TUI dashboard, first-run wizard, and LeRobot data collection pipeline.
+**Goal:** Build the TUI dashboard, first-run wizard, LeRobot data collection pipeline, and demo mode for trade shows.
 
 | Order | Story | Size | Dependencies |
 |-------|-------|------|--------------|
@@ -208,24 +208,27 @@ Build the `armos` Python package with a hardware abstraction layer, robot profil
 | 4 | 7.3 Workflow Launcher Panel | L | 7.1, 7.2, 6.1, 6.2, 4.2a |
 | 5 | 9.3 Data Collection Command | L | 9.2, 6.2, 5.1 |
 | 6 | 7.0 First-Run Setup Wizard | L | 7.1, 6.1, 6.4 |
+| 7 | 7.4 Demo Mode (Kiosk) | M | 6.2, 7.1, 3.2 |
 
-**Capacity:** 6 stories (3M + 3L). Total weight: 24. Heavy sprint but 7.3/9.3 and 7.0 can overlap.
+**Capacity:** 7 stories (4M + 3L). Total weight: 27. Heavy sprint but 7.3/9.3 and 7.0/7.4 can overlap.
 
-**Demo:** TUI dashboard with live telemetry, first-run wizard guides through setup, `armos record` captures data.
+**Demo:** TUI dashboard with live telemetry, first-run wizard guides through setup, `armos record` captures data, `armos demo` runs a locked-down kiosk session.
 
 **Notes:**
 - 7.1 and 9.2 can start in parallel at sprint start.
 - 7.0 (first-run wizard) depends on 7.1 and 6.1 -- can start mid-sprint.
+- 7.4 (demo mode) depends on 6.2, 7.1, and 3.2 -- can start mid-sprint after 7.1 completes.
 - 9.3 depends on 9.2 and the teleop command (6.2) from Sprint 5.
 - The telemetry opt-in prompt is built into 7.0 (first-run wizard).
 - The upload dataset command stub is built into 9.3.
+- If 7.4 overflows, it can slip to Sprint 6b without blocking the critical path (but it must land before Sprint 8 launch prep).
 
 **Partnership:**
 - Open a discussion in LeRobot GitHub: "We're building a bootable USB for LeRobot."
 
 **Content:**
-- Week 11: "Building a TUI for robot control with Textual" (dev log #5) -- Blog, X
-- Week 12: "The 90-second demo video" (pre-launch teaser) -- YouTube, X
+- Week 13: "Building a TUI for robot control with Textual" (dev log #5) -- Blog, X
+- Week 14: "The 90-second demo video" (pre-launch teaser) -- YouTube, X
 
 ---
 
@@ -252,14 +255,14 @@ Build the `armos` Python package with a hardware abstraction layer, robot profil
 - **Spike S4** (ISO Distribution Strategy, 1 day) and **Spike S5** (OTA Update Mechanism, 2 days) run during this sprint.
 
 **Content:**
-- Week 13: "How to build a bootable Linux USB with live-build" -- Blog, Dev.to
-- Week 14: "Testing armOS on 5 different laptops" (compatibility results) -- Blog, YouTube
+- Week 15: "How to build a bootable Linux USB with live-build" -- Blog, Dev.to
+- Week 16: "Testing armOS on 5 different laptops" (compatibility results) -- Blog, YouTube
 
 ---
 
-### Sprint 7: Hardware Testing + CI/CD + Release (Weeks 17-18)
+### Sprint 7: CI/CD + Hardware Testing + Release Prep (Weeks 15-16)
 
-**Goal:** Validate the ISO on multiple hardware platforms, build the CI/CD pipeline for ISO builds, fix remaining issues, and ship the MVP.
+**Goal:** Validate the ISO on multiple hardware platforms, build the CI/CD pipeline for ISO builds, and prepare for launch. This sprint overlaps with Sprint 6b -- CI/CD and hardware testing run in parallel with the ISO build.
 
 | Order | Story | Size | Dependencies |
 |-------|-------|------|--------------|
@@ -268,51 +271,46 @@ Build the `armos` Python package with a hardware abstraction layer, robot profil
 | 3 | 8.8 ISO Distribution Pipeline | M | 8.6, 8.7 |
 | 4 | 8.4 Hardware Compatibility Testing | L | 8.1b, 8.2 |
 | 5 | Bug fixes and polish | -- | All |
-| 6 | MVP release preparation | -- | All |
 
 **Capacity:** 4 stories + buffer. Total weight: 14+.
 
-**Demo:** ISO boots and works on 5+ x86 machines. CI pipeline builds and smoke-tests ISOs. MVP shipped.
+**Demo:** ISO boots and works on 5+ x86 machines. CI pipeline builds and smoke-tests ISOs. Distribution pipeline verified.
 
 **Notes:**
 - 8.6 and 8.7 can run in parallel with 8.4.
 - 8.8 depends on 8.6 and 8.7.
 - Hardware compatibility testing runs throughout the sprint.
-- The pre-launch checklist (see below) must be completed before Sprint 8.
-
-**Content:**
-- Week 15: "The complete armOS getting started guide" -- Blog, YouTube
-- Week 16: Pre-launch announcement: "armOS launches next week" -- X, Discord, all channels
+- Sprint 7 overlaps with the end of Sprint 6b; the CI/CD stories (8.6, 8.7) can begin as soon as 8.1b produces its first ISO.
 
 **Partnership:**
 - Email the HuggingFace robotics team to propose co-marketing
 
 ---
 
-### Sprint 8: Launch Preparation (Weeks 19-20)
+### Sprint 8: Launch Preparation (Weeks 17-18)
 
 **Goal:** Prepare and execute the public launch of armOS. By the end of this sprint, armOS is live on GitHub, announced on 3+ channels, and the demo video has been published.
 
 | Order | Story | Size | Dependencies |
 |-------|-------|------|--------------|
-| 1 | 7.4 Demo Mode (Kiosk) | M | 6.2, 7.1, 3.2 |
-| 2 | Demo video recording (3-5 takes, edit to 90 seconds) | -- | 7.4 |
-| 3 | Launch blog post | -- | All |
-| 4 | Final ISO build with demo mode included | -- | 7.4 |
-| 5 | GitHub README finalized with embedded video | -- | Demo video |
-| 6 | Discord server created and configured | -- | None |
-| 7 | Alpha tester feedback incorporated | -- | All |
+| 1 | Demo video recording (3-5 takes, edit to 90 seconds) | -- | 7.4 |
+| 2 | Launch blog post | -- | All |
+| 3 | Final ISO build with demo mode included | -- | 7.4 |
+| 4 | GitHub README finalized with embedded video | -- | Demo video |
+| 5 | Discord server created and configured | -- | None |
+| 6 | Alpha tester feedback incorporated | -- | All |
+| 7 | MVP release preparation | -- | All |
 
-**Capacity:** 1 story (M) + launch execution tasks. Total weight: 3+.
+**Capacity:** Launch execution tasks. Total weight: 3+.
 
 #### Launch Sprint Day-by-Day
 
 | Day | Activity | Deliverable |
 |-----|----------|-------------|
-| 1-2 | Demo mode implementation (Story 7.4) | `armos demo` working |
+| 1-2 | Final ISO build, hardware validation on Tier 1 machines | v0.1.0 ISO candidate |
 | 3 | Record demo video (3-5 takes, edit to 90 seconds) | YouTube-ready video |
 | 4-5 | Write launch blog post | Published on blog/Medium/Dev.to |
-| 6 | Final ISO build with demo mode included | v0.1.0 ISO on HuggingFace Hub |
+| 6 | Final ISO build with all fixes | v0.1.0 ISO on HuggingFace Hub |
 | 7 | Create Discord server, configure channels and roles | Discord invite link |
 | 8 | Write GitHub README with embedded video, download link | README.md finalized |
 | 9 | Alpha tester feedback incorporated, final bug fixes | v0.1.1 if needed |
@@ -349,7 +347,7 @@ Build the `armos` Python package with a hardware abstraction layer, robot profil
 
 ---
 
-### Sprint 9: Post-Launch Stabilization (Weeks 21-22)
+### Sprint 9: Public Launch + Triage (Weeks 19-20)
 
 **Goal:** Respond to every user issue within 24 hours. Ship a patch release (v0.1.2) addressing the top 5 user-reported issues. Maintain community momentum.
 
@@ -431,11 +429,11 @@ Prepare template responses for each of these categories before launch.
 
 | Sprint | Weeks | Theme | Key Deliverables |
 |--------|-------|-------|-----------------|
-| 10 | 23-24 | Stabilization | Bug fixes from user feedback, compatibility matrix expansion, Tier 2 hardware testing |
-| 11 | 25-26 | Telemetry + analytics | Anonymous usage telemetry (11.1), crash reporting, feedback pipeline |
-| 12 | 27-28 | Cloud training alpha | Upload pipeline (11.2), GPU backend, first 10 training runs |
-| 13 | 29-30 | Profile marketplace | Profile sharing via Hub (11.3), community profiles |
-| 14 | 31-32 | Fleet + education | Fleet deployment (11.4), education pilot prep |
+| 10 | 21-22 | Stabilization | Bug fixes from user feedback, compatibility matrix expansion, Tier 2 hardware testing |
+| 11 | 23-24 | Telemetry + analytics | Anonymous usage telemetry (11.1), crash reporting, feedback pipeline |
+| 12 | 25-26 | Cloud training alpha | Upload pipeline (11.2), GPU backend, first 10 training runs |
+| 13 | 27-28 | Profile marketplace | Profile sharing via Hub (11.3), community profiles |
+| 14 | 29-30 | Fleet + education | Fleet deployment (11.4), education pilot prep |
 
 ### Growth Phase Backlog (Unscheduled)
 
@@ -456,7 +454,7 @@ Prepare template responses for each of these categories before launch.
 
 ## Partnership Development Timeline
 
-### Phase 0: Warm-Up (Sprints 5-8, Months 3-5)
+### Phase 0: Warm-Up (Sprints 5-7, Months 3-4)
 
 | Action | When | Who to Contact | Purpose |
 |--------|------|----------------|---------|
@@ -485,13 +483,13 @@ Prepare template responses for each of these categories before launch.
 
 ---
 
-## Content Calendar Summary
+## Content Calendar Summary (First 90 Days Post-Sprint-0)
 
 | Month | Sprint | Theme | Key Content |
 |-------|--------|-------|-------------|
 | 1 | 1-2 | Build in public | Dev logs, SEO blog posts on servo debugging |
 | 2 | 3-4 | Technical deep dives | Overload protection tutorial (YouTube), diagnostic suite dev log |
-| 3 | 5-6a | Demo content | First teleop teaser (YouTube Shorts), TUI dev log |
+| 3 | 5-6a | Demo content | First teleop teaser (YouTube Shorts), TUI dev log, demo mode preview |
 | 4 | 6b-7 | Pre-launch | live-build tutorial, compatibility results, getting started guide |
 | 5 | 8 | **Launch** | Launch blog post + demo video (HN, Reddit, Discord) |
 | 6 | 9-10 | Post-launch | Retrospective, contributor guide, roadmap post |
@@ -540,10 +538,10 @@ The 4.2a/4.2b split (migrate diagnostic checks) reduces risk -- 4.2a can ship wh
 | **Stories 4.2a/4.2b (migrate diagnostics) take longer than estimated** | Medium | Medium | Split into read-only (4.2a) and active (4.2b) checks reduces risk. 4.2b can overflow without blocking teleop critical path. |
 | **Story 8.1b (live-build ISO) is blocked by unforeseen OS packaging issues** | Medium | High | De-risked by 8.1a spike in Sprint 4a. Do not wait until Sprint 6b to discover packaging problems. Fallback: ship installer script alongside base Ubuntu ISO. |
 | **Hardware availability for testing** | Low | Medium | SO-101 hardware is already available on the Surface Pro 7. Ensure USB cameras are sourced by Sprint 5. Source 2-3 additional test machines by Sprint 6. |
-| **Sprint 6a overload (24 weight points)** | Medium | Medium | Split into 6a (TUI + data) and 6b (USB image). 8.1a spike in Sprint 4a de-risks the build. |
+| **Sprint 6a overload (27 weight points)** | Medium | Medium | Split into 6a (TUI + data + demo) and 6b (USB image). 8.1a spike in Sprint 4a de-risks the build. 7.4 can slip to 6b if needed. |
 | **LeRobot v0.5.0 API changes** | Low | High | Pin to v0.5.0. The bridge layer (9.2) isolates LeRobot from the rest of the system. |
 | **Sprint 4a/4b balance** | Low | Low | Split into 4a (15 points) and 4b (16 points) keeps both under capacity. 4.2b can overflow if needed. |
-| **Demo mode not ready for launch** | Low | Medium | 7.4 is a focused M-sized story with clear dependencies. Schedule early in Sprint 8. |
+| **Demo mode not ready for launch** | Low | Medium | 7.4 is a focused M-sized story scheduled in Sprint 6a. If it slips, it can land in Sprint 6b. Must be done before Sprint 8 launch prep. |
 
 ---
 
@@ -580,18 +578,18 @@ The MVP is complete when ALL of the following are true:
 | 4a | 7-8 | 4, 5, 8 | 5 | 15 | Diag framework + live-build spike | Diagnostics framework + ISO boots in QEMU |
 | 4b | 9-10 | 4, 5 | 4 | 16 | Active diagnostics + faults | `armos diagnose` runs all checks |
 | 5 | 11-12 | 6 | 4 | 14 | Calibration + teleop | `armos teleop` -- first full demo |
-| 6a | 13-14 | 7, 9 | 6 | 24 | TUI + data collection | TUI with first-run wizard |
+| 6a | 13-14 | 7, 9 | 7 | 27 | TUI + data collection + demo mode | TUI with first-run wizard + demo mode |
 | 6b | 15-16 | 8, 9 | 6 | 17 | USB image + polish | Bootable ISO with splash |
-| 7 | 17-18 | 8 | 4+ | 14+ | CI/CD + hardware testing + release | MVP shipped |
-| 8 | 19-20 | 7 | 1+ | 3+ | Launch preparation | Demo mode, launch day |
-| 9 | 21-22 | -- | -- | -- | Post-launch stabilization | v0.1.2 patch release |
-| **MVP Total** | **18 weeks** | **10** | **47** | **131** | | |
-| **Through Launch** | **22 weeks** | **10** | **48+** | **134+** | | |
+| 7 | 15-16 | 8 | 4+ | 14+ | CI/CD + hardware testing | Distribution pipeline verified |
+| 8 | 17-18 | -- | -- | 3+ | Launch preparation | Demo video, launch day |
+| 9 | 19-20 | -- | -- | -- | Public launch + triage | v0.1.2 patch release |
+| **MVP Total** | **16 weeks** | **10** | **48** | **134** | | |
+| **Through Launch** | **20 weeks** | **10** | **48+** | **134+** | | |
 | Backlog | -- | 10, 11 | 16 | 45 | Growth phase | -- |
-| **Grand Total** | **22+ weeks** | **12** | **64+** | **179+** | | |
+| **Grand Total** | **20+ weeks** | **12** | **64+** | **179+** | | |
 
-**Estimated MVP delivery:** 18 weeks (Sprint 0 + 7 two-week sprints + buffer). Launch at week 20. Post-launch stabilization through week 22. This accounts for Sprint 4 split, Sprint 6 split, a dedicated hardware testing sprint, and a launch sprint.
+**Estimated MVP delivery:** 16 weeks (Sprint 0 + 7 two-week sprints + overlap). Launch at week 18. Post-launch stabilization through week 20. This accounts for Sprint 4 split, Sprint 6 split, Sprint 6b/7 overlap, a dedicated launch sprint, and post-launch triage.
 
 ---
 
-_Sprint plan for armOS USB -- consolidated v2.0 from sprint plan, QA/execution enhancements, implementation enhancements, and review findings._
+_Sprint plan for armOS USB -- consolidated v2.1 from sprint plan, QA/execution enhancements, implementation enhancements, and review findings._

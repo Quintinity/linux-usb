@@ -4,7 +4,7 @@
 # project_key: NOKEY
 # tracking_system: file-system
 # story_location: _bmad-output/implementation-artifacts
-# version: 2.0 -- consolidated from reviews and implementation enhancements
+# version: 2.1 -- consolidated from reviews, implementation enhancements, and sprint plan v2.1
 
 # STATUS DEFINITIONS:
 # ==================
@@ -123,7 +123,7 @@ development_status:
 
   # ============================================
   # Epic 7: TUI Launcher
-  # Sprint 6a (7.0-7.3), Sprint 8 (7.4)
+  # Sprint 6a (7.0-7.4)
   # ============================================
   epic-7: backlog
   7-0-first-run-setup-wizard-with-hardware-auto-detection: backlog
@@ -184,3 +184,19 @@ development_status:
   11-4-fleet-deployment-config-export-import: backlog
   11-5-armos-update-command: backlog
   epic-11-retrospective: optional
+
+# ============================================
+# Sprint Schedule (for reference)
+# ============================================
+# Sprint 0:  Week 0-1   -- Tooling + Environment
+# Sprint 1:  Weeks 1-2  -- Package Skeleton + CLI
+# Sprint 2:  Weeks 3-4  -- HAL + Feetech Driver
+# Sprint 3:  Weeks 5-6  -- Robot Profiles + SO-101
+# Sprint 4a: Weeks 7-8  -- Diagnostic Framework + Telemetry Core
+# Sprint 4b: Weeks 9-10 -- Active Diagnostics + Fault Detection
+# Sprint 5:  Weeks 11-12 -- Calibration + Teleop CLI
+# Sprint 6a: Weeks 13-14 -- TUI + Data Collection + Demo Mode
+# Sprint 6b: Weeks 15-16 -- USB Image + Polish
+# Sprint 7:  Weeks 15-16 -- CI/CD + Hardware Testing (overlaps 6b)
+# Sprint 8:  Weeks 17-18 -- Launch Preparation
+# Sprint 9:  Weeks 19-20 -- Public Launch + Triage

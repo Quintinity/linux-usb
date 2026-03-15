@@ -2,8 +2,8 @@
 
 **Author:** John (Product Manager Agent)
 **Date:** 2026-03-15
-**Status:** Consolidated v2.0
-**Version:** 2.0
+**Status:** Consolidated v2.1
+**Version:** 2.1
 
 ---
 
@@ -11,14 +11,15 @@
 
 This document provides the complete epic and story breakdown for armOS USB, decomposing the requirements from the PRD and Architecture into implementable stories. Epics are ordered by the architecture's migration phases (A through F) and aligned to the PRD's three-phase product scope: MVP (v0.1), Growth (v0.5), and Vision (v1.0).
 
-Version 2.0 consolidates findings from the developer review, scrum master review, QA/execution enhancements, and implementation enhancements documents. Key changes:
-- Demo mode (B4) pulled into MVP Epic 7 as Story 7.4
-- New Epic 11 "Business Enablement" for Growth-phase business features
+Version 2.1 consolidates findings from the developer review, scrum master review, QA/execution enhancements, and implementation enhancements documents. Key changes from v2.0:
+- Demo mode (B4) pulled into MVP Epic 7 as Story 7.4 and scheduled in Sprint 6a
+- New Epic 11 "Business Enablement" for Growth-phase business features (5 stories: B1-B5)
 - SDK conformance tests (SDK2) added to MVP Epic 2
 - CI/CD and distribution stories added to MVP Epic 8
 - ISO version metadata (V2) added to MVP Epic 8
-- Updated requirements traceability matrix covering all FRs including new ones (FR45-FR55)
+- Updated requirements traceability matrix covering all FRs including FR45-FR55
 - Updated story point summary
+- Sprint plan compressed to 20 weeks to public launch
 
 ---
 
@@ -1076,10 +1077,10 @@ So that the demo cannot be interrupted by accidental keypresses, crashes, or con
 
 **Size:** M
 **Dependencies:** 6.2, 7.1, 3.2
-**Sprint:** 8
+**Sprint:** 6a
 **Implements:** FR45
 
-> **Business driver:** The business plan identifies the live demo as the single most important marketing asset. A 90-second flawless demo at Maker Faire or in a YouTube video is critical for launch. This story is MVP-blocking for launch (Sprint 8) even though it is not needed for core functionality.
+> **Business driver:** The business plan identifies the live demo as the single most important marketing asset. A 90-second flawless demo at Maker Faire or in a YouTube video is critical for launch. This story is scheduled in Sprint 6a to allow testing and polish before the launch sprint.
 
 ---
 
@@ -1732,4 +1733,4 @@ Epic 1 (Package Skeleton)
 
 ---
 
-_Epic breakdown for armOS USB v2.0 -- consolidated from planning, reviews, and implementation enhancements._
+_Epic breakdown for armOS USB v2.1 -- consolidated from planning, reviews, and implementation enhancements._
