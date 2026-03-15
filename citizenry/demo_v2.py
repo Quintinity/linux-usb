@@ -118,6 +118,12 @@ async def run_demo(leader_port="/dev/ttyACM0", fps=30.0):
     section("Phase 6: Task Marketplace")
 
     if not solo:
+        # Pause teleop so follower is available to bid
+        if surface._teleop_active:
+            print(f"  {DIM}Pausing teleop so follower can bid...{RESET}")
+            await surface.stop_teleop()
+            await asyncio.sleep(1)  # Let the Pi detect teleop ended and go idle
+
         # Create a test task
         print(f"  Creating task: {BOLD}basic_gesture{RESET} (wave hello)")
         task = surface.create_task(
@@ -155,6 +161,13 @@ async def run_demo(leader_port="/dev/ttyACM0", fps=30.0):
             print(f"  {GREEN}✓{RESET} Task completed!")
         elif task:
             print(f"  Task status: {task.status.value}")
+
+        # Resume teleop for the remaining demo phases
+        if not surface._teleop_active:
+            n = list(surface.neighbors.values())[0]
+            print(f"\n  {DIM}Resuming teleop with {n.name}...{RESET}")
+            surface._propose_teleop(n)
+            await asyncio.sleep(2)
     else:
         # Solo demo — just show marketplace API
         print(f"  {DIM}(No followers connected — showing marketplace API){RESET}")
