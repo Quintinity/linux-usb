@@ -627,6 +627,17 @@ class Citizen:
         except Exception:
             pass
 
+        # v2.0: load contracts
+        try:
+            from .persistence import load_contracts
+            from .symbiosis import ContractManager
+            saved_contracts = load_contracts(self.name)
+            if saved_contracts:
+                self.contracts = ContractManager.from_list(saved_contracts)
+                self._log(f"loaded {len(saved_contracts)} persisted contracts")
+        except Exception:
+            pass
+
     def _save_persisted_state(self):
         """Save neighbor table, constitution, and v2.0 state to disk."""
         try:
@@ -658,6 +669,15 @@ class Citizen:
             }
             self.genome.version += 1
             save_genome(self.genome)
+        except Exception:
+            pass
+
+        # v2.0: save contracts
+        try:
+            from .persistence import save_contracts
+            contracts_data = self.contracts.to_list()
+            if contracts_data:
+                save_contracts(self.name, contracts_data)
         except Exception:
             pass
 

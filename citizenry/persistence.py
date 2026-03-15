@@ -85,3 +85,53 @@ def load_constitution(name: str) -> dict | None:
         return json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         return None
+
+
+# --- v2.0: Contracts persistence ----------------------------------------------
+
+def save_contracts(name: str, contracts: list[dict]) -> None:
+    """Save active symbiosis contracts to ~/.citizenry/<name>.contracts.json."""
+    _ensure_dir()
+    path = CITIZENRY_DIR / f"{name}.contracts.json"
+    tmp = path.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(contracts, indent=2) + "\n")
+        tmp.replace(path)
+    except OSError:
+        if tmp.exists():
+            tmp.unlink()
+        raise
+
+
+def load_contracts(name: str) -> list[dict]:
+    """Load contracts from disk. Returns empty list on any error."""
+    path = CITIZENRY_DIR / f"{name}.contracts.json"
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+# --- v2.0: Immune memory persistence -----------------------------------------
+
+def save_immune_memory(name: str, patterns: list[dict]) -> None:
+    """Save immune memory patterns to ~/.citizenry/<name>.immune.json."""
+    _ensure_dir()
+    path = CITIZENRY_DIR / f"{name}.immune.json"
+    tmp = path.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(patterns, indent=2) + "\n")
+        tmp.replace(path)
+    except OSError:
+        if tmp.exists():
+            tmp.unlink()
+        raise
+
+
+def load_immune_memory(name: str) -> list[dict]:
+    """Load immune memory from disk. Returns empty list on any error."""
+    path = CITIZENRY_DIR / f"{name}.immune.json"
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
