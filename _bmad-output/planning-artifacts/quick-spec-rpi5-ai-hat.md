@@ -173,7 +173,7 @@ The Hailo handles perception (what objects are where), the CPU or cloud handles 
 | Power | RPi 5 USB-C PSU (27W) | $12 | Official 5.1V/5A supply required |
 | Storage | 32GB microSD (A2) | $10 | 16GB too tight with LeRobot datasets |
 | USB-serial | CH340 adapter (included with SO-101) | $0 | Same adapter as x86 setup |
-| Camera | USB webcam (any UVC-compatible) | $15-50 | Or RPi Camera Module 3 via CSI ($25) |
+| Camera | **RPi Camera Module 3 Wide** (CSI) | $35 | 102° HFOV, 12MP, autofocus, 120fps. CSI has 4x lower latency than USB (~200ms vs ~800ms) and <5% CPU vs ~17%. |
 | Robot arm | SO-101 | $220 | Feetech STS3215 x6 |
 | **Total** | | **~$317-352** | Teleoperation and data collection |
 
@@ -187,7 +187,7 @@ The Hailo handles perception (what objects are where), the CPU or cloud handles 
 | Storage | 64GB microSD (A2) | $15 | Room for multiple HEF models + datasets |
 | Active cooling | Official RPi 5 Active Cooler | $5 | Required under sustained inference load |
 | USB-serial | CH340 adapter | $0 | Included with SO-101 |
-| Camera | RPi Camera Module 3 (CSI) | $25 | Lower latency than USB; frees USB port |
+| Camera | **RPi Camera Module 3 Wide** (CSI) | $35 | 102° HFOV, 12MP, autofocus lockable to fixed distance. 200ms latency vs 800ms USB. Frees USB port for servo controller. |
 | Robot arm | SO-101 | $220 | Feetech STS3215 x6 |
 | **Total** | | **~$437** | Autonomous policy execution |
 
@@ -317,9 +317,13 @@ so that I do not have to manually configure device paths and platform quirks.
 **When** I run `armos` for the first time (first-run wizard)
 **Then** the wizard suggests the `rpi5-so101` profile and applies it on confirmation
 
-**Given** the `rpi5-so101` profile is active and a CSI camera is connected
+**Given** the `rpi5-so101` profile is active and a Pi Camera Module 3 Wide is connected via CSI
 **When** I run `armos detect`
-**Then** the CSI camera is listed alongside any USB cameras, with the CSI camera identified by `libcamera` model string
+**Then** the CSI camera is listed as "imx708_wide" with "CSI" interface type, preferred over any USB cameras
+
+**Given** a Pi Camera Module 3 Wide connected via CSI
+**When** armOS captures frames for data collection
+**Then** frames are captured via `picamera2` (not OpenCV), autofocus is locked to the configured `lens_position`, and capture latency is under 50ms per frame
 
 ---
 
@@ -513,14 +517,19 @@ hardware:
     servo_ids: [1, 2, 3, 4, 5, 6]
 
   cameras:
+    - type: csi
+      backend: picamera2  # libcamera Python bindings
+      model: imx708_wide  # Pi Camera Module 3 Wide
+      resolution: [640, 480]
+      fps: 30
+      autofocus: manual    # Lock focus for consistent manipulation frames
+      lens_position: 4.0   # ~25cm working distance (tune per mount)
+      priority: primary    # Prefer CSI over USB (4x lower latency)
     - type: usb
       path: /dev/video*
       resolution: [640, 480]
       fps: 30
-    - type: csi
-      backend: libcamera
-      resolution: [640, 480]
-      fps: 30
+      priority: fallback
 
   accelerator:
     type: hailo
