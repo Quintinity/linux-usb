@@ -72,13 +72,54 @@ class CameraCitizen(Citizen):
         body = env.body
         task = body.get("task", "")
 
-        if task == "frame_capture":
+        # v2.0: Marketplace tasks have task_id — route to bidding first
+        if body.get("task_id") and task not in ("teleop", "teleop_frame", "symbiosis_propose"):
+            self._handle_marketplace_propose(env, addr, body)
+        elif task == "frame_capture":
             self._handle_frame_capture(env, addr, body)
         elif task == "color_detection":
             self._handle_color_detection(env, addr, body)
-        else:
-            # Unknown task — reject
+        elif task not in ("teleop", "teleop_frame", "symbiosis_propose"):
             self.send_reject(env.sender, f"unknown task: {task}", addr)
+
+    def _handle_marketplace_propose(self, env, addr, body):
+        """Evaluate a marketplace task and bid if we have the required capabilities."""
+        from .marketplace import Task, compute_bid_score
+        task = Task.from_propose_body(body)
+
+        for cap in task.required_capabilities:
+            if cap not in self.capabilities:
+                self.send_reject(env.sender, f"missing capability: {cap}", addr)
+                return
+
+        for skill in task.required_skills:
+            if not self.skill_tree.has_skill(skill):
+                self.send_reject(env.sender, f"missing skill: {skill}", addr)
+                return
+
+        score = compute_bid_score(skill_level=1, current_load=0.1, health=self.health)
+
+        # Use the neighbor's known unicast address for reliable delivery
+        reply_addr = addr
+        if env.sender in self.neighbors:
+            reply_addr = self.neighbors[env.sender].addr
+
+        from .protocol import make_envelope, MessageType as MT
+        env_out = make_envelope(
+            MT.ACCEPT_REJECT,
+            self.pubkey,
+            {
+                "accepted": True,
+                "task_id": task.id,
+                "task": task.type,
+                "bid": {"skill_level": 1, "load": 0.1, "health": self.health, "score": score},
+            },
+            self._signing_key,
+            recipient=env.sender,
+        )
+        self._unicast.send(env_out, reply_addr)
+        self.messages_sent += 1
+        self._log(f"bid sent: [{task.id}] {task.type} score={score:.2f}")
 
     def _handle_frame_capture(self, env, addr, body):
         """Capture a frame and return it as base64 JPEG."""
