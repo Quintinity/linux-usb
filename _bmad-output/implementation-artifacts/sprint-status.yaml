@@ -4,6 +4,7 @@
 # project_key: NOKEY
 # tracking_system: file-system
 # story_location: _bmad-output/implementation-artifacts
+# version: 2.0 -- consolidated from reviews and implementation enhancements
 
 # STATUS DEFINITIONS:
 # ==================
@@ -72,6 +73,7 @@ development_status:
   2-2-servo-bus-scan: backlog
   2-3-protection-settings-read-write: backlog
   2-4-resilient-communication-with-retry-and-port-flush: backlog
+  2-5-servoprotocol-conformance-test-suite: backlog
   epic-2-retrospective: optional
 
   # ============================================
@@ -121,18 +123,19 @@ development_status:
 
   # ============================================
   # Epic 7: TUI Launcher
-  # Sprint 6a
+  # Sprint 6a (7.0-7.3), Sprint 8 (7.4)
   # ============================================
   epic-7: backlog
   7-0-first-run-setup-wizard-with-hardware-auto-detection: backlog
   7-1-tui-application-shell: backlog
   7-2-live-telemetry-panel: backlog
   7-3-workflow-launcher-panel: backlog
+  7-4-demo-mode-kiosk: backlog
   epic-7-retrospective: optional
 
   # ============================================
   # Epic 8: Pre-built USB Image
-  # Sprint 4a (spike), Sprint 6b (full build), Sprint 7 (testing)
+  # Sprint 4a (spike), Sprint 6b (full build), Sprint 7 (testing/CI)
   # ============================================
   epic-8: backlog
   8-1a-live-build-spike-minimal-bootable-iso: backlog
@@ -141,6 +144,10 @@ development_status:
   8-3-windows-flash-script-update: backlog
   8-4-hardware-compatibility-testing: backlog
   8-5-plymouth-boot-splash: backlog
+  8-6-dockerfile-build-for-reproducible-iso-builds: backlog
+  8-7-qemu-iso-smoke-test: backlog
+  8-8-iso-distribution-pipeline: backlog
+  8-9-iso-version-metadata: backlog
   epic-8-retrospective: optional
 
   # ============================================
@@ -165,3 +172,15 @@ development_status:
   10-5-usb-image-cloning-for-fleet-deployment: backlog
   10-6-ai-troubleshooting-with-live-system-state: backlog
   epic-10-retrospective: optional
+
+  # ============================================
+  # Epic 11: Business Enablement
+  # Backlog (Growth phase)
+  # ============================================
+  epic-11: backlog
+  11-1-anonymous-telemetry-collection-opt-in: backlog
+  11-2-cloud-training-upload-hook: backlog
+  11-3-profile-sharing-via-huggingface-hub: backlog
+  11-4-fleet-deployment-config-export-import: backlog
+  11-5-armos-update-command: backlog
+  epic-11-retrospective: optional

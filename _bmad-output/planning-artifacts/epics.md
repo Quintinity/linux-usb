@@ -2,14 +2,23 @@
 
 **Author:** John (Product Manager Agent)
 **Date:** 2026-03-15
-**Status:** Draft
-**Version:** 1.0
+**Status:** Consolidated v2.0
+**Version:** 2.0
 
 ---
 
 ## Overview
 
 This document provides the complete epic and story breakdown for armOS USB, decomposing the requirements from the PRD and Architecture into implementable stories. Epics are ordered by the architecture's migration phases (A through F) and aligned to the PRD's three-phase product scope: MVP (v0.1), Growth (v0.5), and Vision (v1.0).
+
+Version 2.0 consolidates findings from the developer review, scrum master review, QA/execution enhancements, and implementation enhancements documents. Key changes:
+- Demo mode (B4) pulled into MVP Epic 7 as Story 7.4
+- New Epic 11 "Business Enablement" for Growth-phase business features
+- SDK conformance tests (SDK2) added to MVP Epic 2
+- CI/CD and distribution stories added to MVP Epic 8
+- ISO version metadata (V2) added to MVP Epic 8
+- Updated requirements traceability matrix covering all FRs including new ones (FR45-FR55)
+- Updated story point summary
 
 ---
 
@@ -37,63 +46,79 @@ This document provides the complete epic and story breakdown for armOS USB, deco
 | FR16 | Live telemetry during teleoperation | MVP |
 | FR17 | Auto-halt on protection threshold breach | MVP |
 | FR18 | Configurable teleop parameters | Growth |
-| FR19 | Comprehensive hardware diagnostic suite | MVP |
-| FR20 | Real-time servo register monitoring | MVP |
-| FR21 | Diagnostic/monitoring data logging to CSV | MVP |
+| FR19 | Hardware diagnostics (per-servo health checks) | MVP |
+| FR20 | Real-time servo telemetry stream | MVP |
+| FR21 | Telemetry logging (CSV) | MVP |
 | FR22 | Programmatic arm exercise routines | MVP |
-| FR23 | Fault condition detection and reporting | MVP |
+| FR23 | Fault detection and alerting | MVP |
 | FR24 | Record teleop sessions as LeRobot datasets | MVP |
-| FR25 | Data collection session configuration | MVP |
-| FR26 | Episode review, replay, and deletion | Growth |
-| FR27 | Local dataset storage in LeRobot format | MVP |
-| FR28 | USB boot on x86 UEFI hardware | MVP |
-| FR29 | Persistent user data across reboots | MVP |
-| FR30 | Full offline operation | MVP |
-| FR31 | Windows flash script for USB image | MVP |
+| FR25 | Episode management (start, stop, discard) | MVP |
+| FR26 | Episode review and replay | Growth |
+| FR27 | Dataset export in LeRobot format | MVP |
+| FR28 | Bootable USB image with all dependencies | MVP |
+| FR29 | Persistent storage across reboots | MVP |
+| FR30 | Offline operation (no internet required) | MVP |
+| FR31 | Windows flash script | MVP |
 | FR32 | USB image cloning for fleet deployment | Growth |
-| FR33 | Central status dashboard | MVP (TUI) |
-| FR34 | Dashboard-launched workflows | MVP (TUI) |
-| FR35 | Live camera feeds in dashboard | Growth |
-| FR36 | Actionable error messages with suggested fixes | MVP |
-| FR37 | Pre-seeded AI context files (CLAUDE.md, memory) | MVP |
+| FR33 | TUI dashboard with hardware status | MVP |
+| FR34 | TUI workflow launcher (keyboard shortcuts) | MVP |
+| FR35 | Live camera feeds in TUI | Growth |
+| FR36 | Bus disconnection detection and alert | MVP |
+| FR37 | AI-assisted troubleshooting context | MVP |
 | FR38 | AI troubleshooting with live system state | Vision |
-| FR39 | Plugin interface for new servo protocols | Growth |
-| FR40 | YAML-only profile addition (no code changes) | Growth |
-| FR41 | Third-party plugin/profile directory | Vision |
+| FR39 | ServoProtocol plugin architecture (ABC) | MVP (ABC), Growth (plugins) |
+| FR40 | Entry-point-based plugin discovery | Growth |
+| FR41 | Plugin scaffolding command | Vision |
+| FR42 | Teleop watchdog (disable torque on stall) | MVP |
+| FR43 | First-run setup wizard | MVP |
+| FR44 | Plymouth boot splash | MVP |
+| FR45 | Demo mode (kiosk) for trade shows and videos | MVP |
+| FR46 | Anonymous telemetry collection (opt-in) | Growth |
+| FR47 | Cloud training upload hook | Growth |
+| FR48 | Profile sharing via HuggingFace Hub | Growth |
+| FR49 | Fleet deployment config export/import | Growth |
+| FR50 | ISO distribution pipeline (HuggingFace Hub + fallbacks) | MVP |
+| FR51 | ISO version metadata (/etc/armos-release) | MVP |
+| FR52 | Reproducible ISO builds via Docker | MVP |
+| FR53 | QEMU ISO smoke test | MVP |
+| FR54 | ServoProtocol conformance test suite | MVP |
+| FR55 | armos update command (OTA package updates) | Growth |
 
-### Non-Functional Requirements
+### Non-Functional Requirements (Summary)
 
-| ID | Requirement | Category |
-|----|-------------|----------|
-| NFR1 | Teleop loop latency <= 20ms (p95) | Performance |
-| NFR2 | Servo bus scan <= 3 seconds (12 servos) | Performance |
-| NFR3 | Hardware auto-detection <= 5 seconds | Performance |
-| NFR4 | Dashboard telemetry >= 10 Hz | Performance |
-| NFR5 | Boot time <= 90 seconds to dashboard | Performance |
-| NFR6 | Automatic retry on transient servo failures (up to 10 retries) | Reliability |
-| NFR7 | Bus disconnection detection <= 2 seconds | Reliability |
-| NFR8 | No episode data loss on system error | Reliability |
-| NFR9 | Survive unexpected power loss (journaled FS) | Reliability |
-| NFR10 | 90%+ x86 UEFI boot compatibility | Reliability |
-| NFR11 | Primary workflows completable without terminal | Usability |
-| NFR12 | Error messages include cause + remediation | Usability |
-| NFR13 | Dashboard operable via keyboard, mouse, or touch | Usability |
-| NFR14 | USB image fits on 32GB drive (base <= 16GB) | Portability |
-| NFR15 | Runs on Intel i5 6th gen / Ryzen 3 1st gen, 8GB RAM | Portability |
-| NFR16 | All runtime dependencies pre-installed | Portability |
-| NFR17 | Human-readable YAML profiles with JSON schema | Maintainability |
-| NFR18 | Servo driver interface < 15 methods, < 500 LOC | Maintainability |
-| NFR19 | Structured hardware event logging | Maintainability |
-| NFR20 | No network services on fresh boot | Security |
-| NFR21 | Serial access restricted to armos group (MODE=0660) | Security |
-| NFR22 | No user data transmitted without explicit action | Security |
+| ID | Requirement |
+|----|-------------|
+| NFR1 | Python 3.12+, Linux x86_64 |
+| NFR2 | Single-file install via pip |
+| NFR3 | Hardware detection within 5 seconds |
+| NFR4 | Telemetry update rate 10 Hz minimum |
+| NFR5 | Boot to TUI within 90 seconds |
+| NFR6 | Retry with exponential backoff on transient serial errors |
+| NFR7 | Graceful degradation on hardware disconnect |
+| NFR8 | No data loss on crash (episodes saved immediately) |
+| NFR9 | Filesystem survives unexpected power loss |
+| NFR10 | 80%+ boot success on post-2016 x86 UEFI hardware |
+| NFR11 | All workflows accessible without terminal commands |
+| NFR12 | Actionable error messages with remediation steps |
+| NFR13 | Sub-500ms teleop loop stall detection |
+| NFR14 | ISO size under 16GB |
+| NFR15 | All public APIs documented with Google-style docstrings |
+| NFR16 | 80%+ test coverage |
+| NFR17 | Profile schema validated with Pydantic |
+| NFR18 | ServoProtocol ABC has fewer than 12 abstract methods |
+| NFR19 | Plugin implementable in under 500 lines |
+| NFR20 | Green CI on every merge |
+| NFR21 | Pre-commit hooks (ruff, mypy) from day one |
+| NFR22 | No user data transmitted without explicit action |
 
 ---
 
-## FR Coverage Map
+## Story-to-FR Coverage Map
 
-| Story | Functional Requirements Covered |
-|-------|-------------------------------|
+| Story | FRs Covered |
+|-------|-------------|
+| 0.1 | -- (infrastructure) |
+| 0.2 | -- (infrastructure) |
 | 1.1 | -- (infrastructure) |
 | 1.2 | -- (infrastructure) |
 | 1.3 | -- (infrastructure) |
@@ -103,10 +128,12 @@ This document provides the complete epic and story breakdown for armOS USB, deco
 | 2.2 | FR2, FR23 (partial) |
 | 2.3 | FR11 |
 | 2.4 | NFR6 |
+| 2.5 | FR54 |
 | 3.1 | FR7, FR10, NFR17 |
 | 3.2 | FR7 (validation) |
 | 3.3 | FR12, FR13 |
 | 3.4 | FR14 |
+| 3.5 | FR4 |
 | 4.1 | FR19 (partial) |
 | 4.2a | FR19, FR23 |
 | 4.2b | FR19, FR23 |
@@ -116,17 +143,24 @@ This document provides the complete epic and story breakdown for armOS USB, deco
 | 5.2 | FR21 |
 | 5.3 | FR23, FR36, NFR7, NFR12 |
 | 6.1 | FR12 |
-| 6.2 | FR15, FR17 |
+| 6.2 | FR15, FR17, FR42 |
 | 6.3 | FR16 |
 | 6.4 | FR1 (CH340), FR4 |
+| 7.0 | FR43 |
 | 7.1 | FR33 (TUI), FR34 (TUI) |
 | 7.2 | FR33 (TUI) |
 | 7.3 | FR34 (TUI), NFR11 |
+| 7.4 | FR45 |
 | 8.1a | NFR5 (spike validation) |
 | 8.1b | FR28, FR30, NFR5, NFR14 |
 | 8.2 | FR6, FR29, NFR9 |
 | 8.3 | FR31 |
 | 8.4 | NFR10 |
+| 8.5 | FR44 |
+| 8.6 | FR52 |
+| 8.7 | FR53 |
+| 8.8 | FR50 |
+| 8.9 | FR51 |
 | 9.1 | FR37 |
 | 9.2 | FR24, FR25, FR27 |
 | 9.3 | FR24, FR27, NFR8 |
@@ -136,6 +170,11 @@ This document provides the complete epic and story breakdown for armOS USB, deco
 | 10.4 | FR18, FR26, FR35 |
 | 10.5 | FR32 |
 | 10.6 | FR38 |
+| 11.1 | FR46 |
+| 11.2 | FR47 |
+| 11.3 | FR48 |
+| 11.4 | FR49 |
+| 11.5 | FR55 |
 
 ---
 
@@ -154,6 +193,7 @@ This document provides the complete epic and story breakdown for armOS USB, deco
 | 8 | Pre-built USB Image | E (ISO build and AI) | MVP | P0 |
 | 9 | AI Integration and Data Collection | E (ISO build and AI) | MVP | P0 |
 | 10 | Growth Phase -- Multi-Hardware and Polish | F (Growth and polish) | Growth/Vision | P2 |
+| 11 | Business Enablement | F (Growth and polish) | Growth | P2 |
 
 ---
 
@@ -186,35 +226,33 @@ So that every subsequent story has automated testing, consistent code quality, a
 
 **Size:** M
 **Dependencies:** None
-**Sprint:** 0
 
 ---
 
 ### Story 0.2: Hardware Inventory and Test Environment Setup
 
 As a **developer**,
-I want a documented inventory of all available test hardware (machines, cameras, USB hubs, servos) and a reproducible development environment setup,
-So that I know what is available for testing and can onboard quickly.
+I want a documented inventory of all available hardware (machines, servos, cameras, USB hubs) and a reproducible development environment setup,
+So that hardware availability is known before feature work begins and any contributor can bootstrap the dev environment.
 
 **Acceptance Criteria:**
 
 **Given** the hardware inventory document exists
-**When** I read it
-**Then** it lists all available test machines, USB cameras, USB hubs, servo controllers, and what needs to be sourced
+**When** I review it
+**Then** it lists all available test machines, servo kits, cameras, and USB adapters with their status
 
-**Given** a new developer clones the repo
+**Given** a new contributor clones the repository
 **When** they run `make dev`
-**Then** a development virtualenv is created with all dependencies installed
+**Then** the development environment is fully configured (venv, dependencies, pre-commit hooks)
 
 **Size:** S
 **Dependencies:** None
-**Sprint:** 0
 
 ---
 
 ## Epic 1: Package Skeleton and CLI Foundation
 
-**Goal:** Create the `armos` Python package with a working CLI entry point. Move existing scripts into the package structure so that everything is invoked as `armos <command>` instead of `python <script>.py`. This is the foundation every other epic builds on.
+**Goal:** Establish the `armos` Python package structure with `src/` layout, CLI entry point using Click, utility modules, and AI context files. This is the foundation everything else builds on.
 
 **Migration Phase:** A
 **Product Scope:** MVP (v0.1)
@@ -222,16 +260,18 @@ So that I know what is available for testing and can onboard quickly.
 ### Story 1.1: Initialize Python Package with pyproject.toml
 
 As a **developer**,
-I want a `armos` Python package with `pyproject.toml`, proper entry points, and a `click`-based CLI skeleton,
-So that all future commands have a consistent, installable entry point.
+I want a `pyproject.toml` with `src/` layout, `click` entry point, dependency declarations, and `[dev]` extras,
+So that `pip install -e .[dev]` works and the package structure is established.
 
 **Acceptance Criteria:**
 
-**Given** the repository root contains `armos/` and `pyproject.toml`
-**When** I run `pip install -e .` in the repository root
-**Then** the `armos` command is available on PATH
-**And** running `armos --help` displays available command groups
-**And** running `armos --version` displays the version string `0.1.0`
+**Given** the repository has a `src/armos/` directory with `__init__.py`
+**When** I run `pip install -e .[dev]`
+**Then** the `armos` command is available and `import armos` works
+
+**Given** the `pyproject.toml` specifies tool configuration
+**When** I inspect it
+**Then** ruff, mypy, and pytest are configured with the project's standard settings
 
 **Size:** S
 **Dependencies:** None
@@ -241,8 +281,8 @@ So that all future commands have a consistent, installable entry point.
 ### Story 1.2: CLI Command Group Structure
 
 As a **developer**,
-I want stub implementations for all MVP CLI commands (detect, status, calibrate, teleop, record, diagnose, monitor, exercise, config),
-So that the command surface area is established and each epic can fill in the implementations.
+I want all top-level CLI commands defined as Click stubs so the command surface area is established,
+So that subsequent stories can implement individual commands without restructuring the CLI.
 
 **Acceptance Criteria:**
 
@@ -292,7 +332,6 @@ So that all file storage follows a consistent, predictable convention.
 **Given** the module is imported
 **When** I call `config_dir()`, `calibration_dir()`, `datasets_dir()`, `logs_dir()`
 **Then** each returns the correct XDG path under `~/.config/armos/` or `~/.local/share/armos/`
-**And** directories are created automatically if they do not exist
 
 **Size:** S
 **Dependencies:** 1.1
@@ -302,15 +341,15 @@ So that all file storage follows a consistent, predictable convention.
 ### Story 1.5: Migrate CLAUDE.md and AI Context Files
 
 As a **developer**,
-I want the CLAUDE.md and memory files updated to reference `armos` CLI commands instead of raw Python scripts,
-So that AI-assisted troubleshooting works with the new package structure.
+I want the existing CLAUDE.md and memory files migrated into the armos package structure,
+So that AI-assisted troubleshooting context is maintained and versioned with the code.
 
 **Acceptance Criteria:**
 
-**Given** a user has the `armos` package installed
-**When** Claude Code reads the CLAUDE.md
-**Then** all commands reference `armos diagnose`, `armos monitor`, etc., not `python diagnose_arms.py`
-**And** the CLAUDE.md documents the `armos` CLI command set
+**Given** the `armos` package has a `context/` directory
+**When** I inspect it
+**Then** it contains the migrated CLAUDE.md and relevant memory files
+**And** references to CLI commands are updated to reflect the armos command names
 
 **Size:** S
 **Dependencies:** 1.2
@@ -319,7 +358,7 @@ So that AI-assisted troubleshooting works with the new package structure.
 
 ## Epic 2: Hardware Abstraction Layer -- Feetech
 
-**Goal:** Implement the `ServoProtocol` abstract base class and the first concrete implementation (`FeetechPlugin`) that wraps the existing Feetech STS3215 communication code. This decouples all higher-level code from the specific servo hardware.
+**Goal:** Implement the servo protocol abstraction and the Feetech STS3215 driver, including bus scanning, protection settings, retry logic, and a conformance test suite for plugin authors.
 
 **Migration Phase:** B
 **Product Scope:** MVP (v0.1)
@@ -327,20 +366,22 @@ So that AI-assisted troubleshooting works with the new package structure.
 ### Story 2.1: ServoProtocol ABC and FeetechPlugin
 
 As a **developer**,
-I want a `ServoProtocol` abstract base class defining the hardware interface (connect, disconnect, ping, read_position, write_position, sync_read, sync_write, get_telemetry, enable/disable_torque, read/write_register),
-So that all servo communication goes through a testable, swappable abstraction.
+I want a `ServoProtocol` ABC with fewer than 12 abstract methods and a `FeetechPlugin` implementation wrapping LeRobot's `FeetechMotorsBus`,
+So that the HAL provides a clean interface and the Feetech driver is testable against the contract.
 
 **Acceptance Criteria:**
 
-**Given** the `ServoProtocol` ABC exists in `armos.hal.protocol`
-**When** I implement `FeetechPlugin(ServoProtocol)` in `armos.hal.plugins.feetech`
-**Then** the plugin wraps `FeetechMotorsBus` from LeRobot
-**And** all 10+ abstract methods are implemented
-**And** the plugin is discoverable via `ServoProtocol.get_plugin("feetech")`
+**Given** the `ServoProtocol` ABC is defined
+**When** I inspect it
+**Then** it has 12 or fewer abstract methods including: connect, disconnect, ping, scan_bus, sync_read_positions, sync_write_positions, get_telemetry, read_register, write_register, enable_torque, disable_torque, flush_port
 
-**Given** a CH340 USB-serial adapter is connected with STS3215 servos
-**When** I call `plugin.connect("/dev/ttyUSB0")` and `plugin.ping(1)`
-**Then** the servo responds and `ping` returns `True`
+**Given** the `FeetechPlugin` is instantiated
+**When** I call `connect(port="/dev/ttyUSB0", baudrate=1000000)`
+**Then** it connects to the Feetech servo bus via LeRobot's `FeetechMotorsBus`
+
+**Given** the `FeetechPlugin` passes an integration test
+**When** the test exercises the exact call sequence from `teleop_monitor.py`
+**Then** all calls succeed on real hardware
 
 **Size:** L
 **Dependencies:** 1.1, 1.3
@@ -350,19 +391,18 @@ So that all servo communication goes through a testable, swappable abstraction.
 ### Story 2.2: Servo Bus Scan
 
 As a **user**,
-I want to scan a servo bus and see all connected servos with their IDs, firmware versions, and protocol type,
-So that I can verify my hardware is properly connected before calibration.
+I want the system to scan a servo bus and report all connected servos with their IDs, model numbers, and firmware versions,
+So that I can verify my hardware is connected and identify any missing or misconfigured servos.
 
 **Acceptance Criteria:**
 
-**Given** a Feetech servo controller is connected with 6 servos (IDs 1-6)
-**When** I call `plugin.scan_bus(id_range=range(1, 13))`
-**Then** I receive a list of 6 `ServoInfo` objects with id, firmware_version, model, and protocol fields
-**And** the scan completes within 3 seconds (NFR2)
+**Given** a Feetech bus with servos at IDs [1, 2, 3, 4, 5, 6]
+**When** I call `protocol.scan_bus(range(1, 13))`
+**Then** 6 ServoInfo objects are returned with servo_id, model, and firmware_version fields
 
-**Given** a servo on the bus is not responding (disconnected wire)
-**When** the scan runs
-**Then** that servo ID is absent from results (not an error, just not found)
+**Given** a `MockServoProtocol` configured with servos at IDs [1, 2, 3, 6]
+**When** `scan_bus(range(1, 13))` is called
+**Then** 4 ServoInfo objects are returned
 
 **Size:** M
 **Dependencies:** 2.1
@@ -372,19 +412,14 @@ So that I can verify my hardware is properly connected before calibration.
 ### Story 2.3: Protection Settings Read/Write
 
 As a **user**,
-I want the system to read and write servo protection settings (max temperature, max voltage, overload torque, protection time) from a robot profile,
-So that my servos are protected from damage according to my robot's requirements.
+I want the system to read and write servo protection settings (overload torque, protection current, protection time) from the robot profile,
+So that my servos are protected against damage.
 
 **Acceptance Criteria:**
 
-**Given** a robot profile specifies `overload_torque: 90`, `protective_torque: 50`, `protection_time: 254`
-**When** I call `plugin.apply_protection(servo_id, profile.protection)`
-**Then** the EEPROM registers on the servo are written with the specified values
-**And** a subsequent read confirms the values match
-
-**Given** the gripper joint has different protection settings than other joints
-**When** I apply protection from a profile with per-joint overrides
-**Then** the gripper servo receives its custom settings while others receive defaults
+**Given** the SO-101 profile specifies `overload_torque=90` for body joints
+**When** I call `protocol.write_register(servo_id=1, address=OVERLOAD_TORQUE, value=90)`
+**Then** the servo's EEPROM is updated and `read_register` confirms the value
 
 **Size:** M
 **Dependencies:** 2.1
@@ -393,9 +428,9 @@ So that my servos are protected from damage according to my robot's requirements
 
 ### Story 2.4: Resilient Communication with Retry and Port Flush
 
-As a **user**,
-I want servo communication to automatically retry on transient failures with port flush between attempts,
-So that brief electrical noise or timing issues do not crash my teleop session.
+As a **developer**,
+I want the FeetechPlugin to retry failed reads/writes with port flushing,
+So that transient serial errors do not crash teleoperation sessions.
 
 **Acceptance Criteria:**
 
@@ -411,6 +446,28 @@ So that brief electrical noise or timing issues do not crash my teleop session.
 
 **Size:** M
 **Dependencies:** 2.1
+
+---
+
+### Story 2.5: ServoProtocol Conformance Test Suite
+
+As a **plugin developer**,
+I want a pytest base class (`ServoProtocolConformanceTests`) that validates any `ServoProtocol` implementation against the ABC contract,
+So that I can verify my plugin is correct without writing test boilerplate.
+
+**Acceptance Criteria:**
+
+**Given** a class subclasses `ServoProtocolConformanceTests` and provides a protocol fixture
+**When** `pytest` runs
+**Then** the conformance suite validates: connect/disconnect lifecycle, ping, scan_bus, sync_read/write round-trip, get_telemetry range validation, retry behavior, flush_port
+
+**Given** the `MockServoProtocol` from Story 0.1
+**When** the conformance tests run against it
+**Then** all tests pass
+
+**Size:** M
+**Dependencies:** 2.1, 0.1
+**Implements:** FR54
 
 ---
 
@@ -438,6 +495,10 @@ So that malformed profiles are caught at load time with clear error messages.
 **When** I attempt to load it
 **Then** a `ProfileValidationError` is raised with a message identifying the missing field
 
+**Given** a YAML profile with `overload_torque: 2000` (exceeds safe maximum for STS3215)
+**When** I attempt to load it
+**Then** validation rejects with warning: "overload_torque exceeds safe maximum for STS3215"
+
 **Size:** M
 **Dependencies:** 1.1, 1.4
 
@@ -461,6 +522,10 @@ So that I can use my SO-101 without creating any configuration files.
 **And** servo IDs are 1-6 for each arm
 **And** protection settings match the tuned values from the existing deployment (overload_torque=90, protective_torque=50, protection_time=254 for body joints; overload_torque=25 for gripper)
 **And** the LeRobot section specifies robot_type="so100" and fps=60
+
+**Given** the SO-101 profile is loaded
+**When** I inspect the bundled profiles
+**Then** a demo calibration profile ("SO-101 Demo") is also available with pre-baked calibration data for demo mode
 
 **Size:** S
 **Dependencies:** 3.1
@@ -563,6 +628,10 @@ So that diagnostics are composable, extensible, and independently testable.
 **When** the runner processes results
 **Then** the runner continues executing remaining checks (does not abort)
 **And** the final report includes all results, ordered by severity (FAIL first, then WARN, then PASS)
+
+**Given** I run `armos diagnose --protocol dynamixel`
+**When** a non-default protocol is specified
+**Then** the diagnostic suite runs through the specified protocol plugin
 
 **Size:** M
 **Dependencies:** 2.1, 3.1
@@ -805,6 +874,8 @@ So that I can control my robot arm in real time.
 **Dependencies:** 2.1, 2.4, 3.1, 3.3, 5.1, 5.3
 **Implements:** FR15, FR17, FR42
 
+> **Concurrency note:** Start with the single-threaded interleaved model from `teleop_monitor.py` (teleop at 60Hz, telemetry sampling at 2Hz inline). Multi-threaded telemetry is deferred until performance profiling demonstrates a need.
+
 ---
 
 ### Story 6.3: Teleop Monitor Overlay
@@ -852,7 +923,7 @@ So that I can verify my hardware is recognized before starting calibration or te
 
 ## Epic 7: TUI Launcher
 
-**Goal:** Build a terminal user interface (TUI) using `textual` that provides a dashboard for robot status, hardware telemetry, and launching all primary workflows without typing commands. This is the "zero terminal commands" experience for MVP.
+**Goal:** Build a terminal user interface (TUI) using `textual` that provides a dashboard for robot status, hardware telemetry, launching all primary workflows without typing commands, and a demo mode for trade shows. This is the "zero terminal commands" experience for MVP.
 
 **Migration Phase:** D
 **Product Scope:** MVP (v0.1)
@@ -882,9 +953,13 @@ So that I can go from "USB plugged in" to "robot working" without reading docume
 **When** the TUI launches
 **Then** the wizard is skipped and the main dashboard appears directly
 
+**Given** the first-run wizard is running
+**When** the telemetry opt-in step is reached
+**Then** the wizard asks "Share anonymous usage data to help improve armOS? [y/N]" and stores the preference in `~/.config/armos/settings.yaml`
+
 **Size:** L
 **Dependencies:** 7.1, 6.1, 6.4
-**Sprint:** 6
+**Sprint:** 6a
 **Implements:** FR43
 
 ---
@@ -956,14 +1031,61 @@ So that I never need to open a terminal and type commands.
 **When** I press Q or Escape
 **Then** the workflow stops gracefully and I return to the main dashboard
 
+> **Implementation note:** Workflow commands (teleop, calibrate, exercise) should be launched as subprocess calls or take over the terminal, not embedded in the textual event loop. The TUI resumes when the subprocess exits.
+
 **Size:** L
-**Dependencies:** 7.1, 7.2, 6.1, 6.2, 4.2
+**Dependencies:** 7.1, 7.2, 6.1, 6.2, 4.2a
+
+---
+
+### Story 7.4: Demo Mode (Kiosk)
+
+As a **person demonstrating armOS at a booth or in a video**,
+I want a single-command demo mode that boots into a locked-down, self-recovering teleop session,
+So that the demo cannot be interrupted by accidental keypresses, crashes, or configuration issues.
+
+**Acceptance Criteria:**
+
+**Given** a configured SO-101 is connected
+**When** I run `armos demo`
+**Then** a full-screen TUI launches with: large "armOS" header, live camera feed (if available), leader-follower teleop, and a telemetry panel
+
+**Given** demo mode is running
+**When** the servo bus disconnects
+**Then** demo mode displays a reconnection message and auto-reconnects (up to 30 seconds), then resumes teleop
+
+**Given** demo mode is running
+**When** any unhandled exception occurs
+**Then** demo mode restarts itself within 3 seconds
+
+**Given** demo mode is running
+**When** a key other than Escape is pressed
+**Then** the keypress is ignored (all keyboard shortcuts disabled except Escape)
+
+**Given** demo mode is running
+**When** Escape is held for 3 seconds
+**Then** demo mode exits
+
+**Given** the ISO includes a GRUB boot option "armOS Demo Mode"
+**When** the user selects it at boot
+**Then** the system boots directly into demo mode without login
+
+**Given** demo mode starts
+**When** hardware is detected
+**Then** teleop auto-starts using the demo calibration profile (from Story 3.2) with no user interaction required
+
+**Size:** M
+**Dependencies:** 6.2, 7.1, 3.2
+**Sprint:** 8
+**Implements:** FR45
+
+> **Business driver:** The business plan identifies the live demo as the single most important marketing asset. A 90-second flawless demo at Maker Faire or in a YouTube video is critical for launch. This story is MVP-blocking for launch (Sprint 8) even though it is not needed for core functionality.
 
 ---
 
 ## Epic 8: Pre-built USB Image
 
-**Goal:** Create a bootable USB image using `live-build` that ships with the entire `armos` package, LeRobot, all system dependencies, and the SO-101 profile pre-installed. Users flash and boot -- no install process.
+**Goal:** Create a bootable USB image using `live-build` that ships with the entire `armos` package, LeRobot, all system dependencies, and the SO-101 profile pre-installed. Includes CI/CD for reproducible builds, smoke testing, and a distribution pipeline. Users flash and boot -- no install process.
 
 **Migration Phase:** E
 **Product Scope:** MVP (v0.1)
@@ -984,7 +1106,7 @@ So that we validate the live-build toolchain early and de-risk the full ISO buil
 
 **Size:** M
 **Dependencies:** 1.1
-**Sprint:** 4
+**Sprint:** 4a
 
 ---
 
@@ -1010,7 +1132,6 @@ So that the ISO can be built reproducibly in CI or locally.
 
 **Size:** L
 **Dependencies:** 1.1, 2.1, 3.2, 4.2a, 5.1, 6.1, 6.2, 7.1, 8.1a
-**Sprint:** 6
 
 ---
 
@@ -1034,7 +1155,7 @@ So that I never need to run system configuration commands.
 **And** the filesystem survives unexpected power loss (NFR9)
 
 **Size:** L
-**Dependencies:** 8.1
+**Dependencies:** 8.1b
 
 ---
 
@@ -1056,7 +1177,7 @@ So that I can prepare a bootable USB without needing Linux tools.
 **Then** it prompts for confirmation before overwriting
 
 **Size:** M
-**Dependencies:** 8.1
+**Dependencies:** 8.1b
 
 ---
 
@@ -1093,8 +1214,98 @@ So that the boot experience looks polished and professional rather than showing 
 
 **Size:** S
 **Dependencies:** 8.1b
-**Sprint:** 6
-**Implements:** FR44
+
+---
+
+### Story 8.6: Dockerfile.build for Reproducible ISO Builds
+
+As a **developer**,
+I want a Dockerfile that produces identical ISO images regardless of the build machine,
+So that ISO builds are reproducible in CI and locally.
+
+**Acceptance Criteria:**
+
+**Given** the `Dockerfile.build` exists
+**When** I run `docker build -f Dockerfile.build -t armos-builder .`
+**Then** the image builds successfully with all live-build dependencies pinned
+
+**Given** the builder container runs
+**When** I execute `docker run --privileged -v $PWD/output:/output armos-builder`
+**Then** a valid ISO is produced in the `output/` directory
+
+**Size:** M
+**Dependencies:** 8.1b
+**Implements:** FR52
+
+---
+
+### Story 8.7: QEMU ISO Smoke Test
+
+As a **developer**,
+I want an automated smoke test that boots the ISO in QEMU and validates basic functionality,
+So that broken ISOs are caught in CI before release.
+
+**Acceptance Criteria:**
+
+**Given** `tests/iso/test-iso.sh` exists
+**When** I run it against a built ISO
+**Then** it boots the ISO in QEMU with OVMF (UEFI firmware)
+**And** validates: login prompt within 90s, `armos --version` returns expected version, `armos profile list` includes SO-101, no kernel panics in dmesg
+
+**Given** the ISO has a critical issue (fails to boot, missing armos package)
+**When** the smoke test runs
+**Then** the test exits with a non-zero code and a clear error message
+
+**Size:** M
+**Dependencies:** 8.1b
+**Implements:** FR53
+
+---
+
+### Story 8.8: ISO Distribution Pipeline
+
+As a **developer**,
+I want `make release` to build the ISO, compute SHA256, upload to HuggingFace Hub, and generate a BitTorrent file,
+So that users can download verified ISOs from a reliable CDN.
+
+**Acceptance Criteria:**
+
+**Given** a version tag has been pushed
+**When** the GitHub Actions workflow runs
+**Then** the ISO is built via Docker, smoke-tested via QEMU, and uploaded to HuggingFace Hub as a tagged release
+**And** a SHA256 checksum is published alongside the download
+
+**Given** a fresh machine with a 50Mbps connection
+**When** the user downloads the ISO from HuggingFace Hub
+**Then** the download completes and verifies in under 10 minutes
+
+**Size:** M
+**Dependencies:** 8.6, 8.7
+**Implements:** FR50
+
+> **Distribution channels:** Primary: HuggingFace Hub (`armos/armos-usb` repo). Fallback: Cloudflare R2. Community: BitTorrent seeded after each release.
+
+---
+
+### Story 8.9: ISO Version Metadata
+
+As a **developer**,
+I want the ISO build to write `/etc/armos-release` with version, build date, git hash, and armos package version,
+So that `armos --version` can display complete build information.
+
+**Acceptance Criteria:**
+
+**Given** the ISO has been built
+**When** I boot it and run `armos --version`
+**Then** it displays: package version, ISO version (with date suffix), and git hash
+
+**Given** `/etc/armos-release` exists in the ISO
+**When** I inspect it
+**Then** it contains: `version`, `build_date`, `git_hash`, `armos_version` fields
+
+**Size:** S
+**Dependencies:** 8.1b
+**Implements:** FR51
 
 ---
 
@@ -1120,7 +1331,7 @@ So that I can get AI-assisted troubleshooting without manual context setup.
 **And** `armos diagnose --json` output can be pasted to Claude for interpretation
 
 **Size:** S
-**Dependencies:** 1.5, 8.1
+**Dependencies:** 1.5, 8.1b
 
 ---
 
@@ -1141,6 +1352,10 @@ So that I can record datasets without writing LeRobot config files manually.
 **Given** cameras are detected via V4L2
 **When** the bridge builds the config
 **Then** detected cameras are mapped to observation keys in the LeRobot config
+
+**Given** the bridge produces a config
+**When** it is passed to LeRobot's `record()` function
+**Then** it successfully records an episode to disk (validated with a 5-second recording session)
 
 **Size:** M
 **Dependencies:** 3.1, 3.3, 2.1
@@ -1169,6 +1384,10 @@ So that I can collect training data for imitation learning.
 **When** the system encounters a transient servo error
 **Then** the current episode is marked with a warning flag but recording continues
 
+**Given** the user runs `armos upload`
+**When** cloud training is not yet available
+**Then** the command prints "Cloud training coming soon. Your dataset is saved at /path." (placeholder for Growth phase)
+
 **Size:** L
 **Dependencies:** 9.2, 6.2, 5.1
 
@@ -1187,21 +1406,6 @@ As a **user**,
 I want the system to automatically detect USB devices when plugged in and match them to the best robot profile,
 So that I do not need to manually configure ports or select profiles.
 
-**Acceptance Criteria:**
-
-**Given** no robot hardware is connected
-**When** I plug in two CH340 USB-serial adapters
-**Then** within 5 seconds (NFR3), the system detects both adapters, scans the servo buses, and matches the configuration to the SO-101 profile
-**And** the dashboard updates to show "SO-101 detected (leader + follower)"
-
-**Given** a FTDI adapter (Dynamixel U2D2) is plugged in
-**When** the system scans the servo bus
-**Then** it identifies the Dynamixel protocol and reports "Dynamixel servos detected -- searching for matching profile"
-
-**Given** the detected hardware does not match any profile
-**When** detection completes
-**Then** the system reports "Unknown configuration: 4x Dynamixel XL330 servos. No matching profile. Use `armos profile create` to define one."
-
 **Size:** L
 **Dependencies:** 2.1, 3.1, 6.4
 
@@ -1210,20 +1414,8 @@ So that I do not need to manually configure ports or select profiles.
 ### Story 10.2: Plugin Architecture for Servo Protocols
 
 As a **developer**,
-I want to add support for new servo protocols by implementing the `ServoProtocol` interface and dropping a plugin file into the plugins directory,
+I want to add support for new servo protocols by implementing the `ServoProtocol` interface and registering via Python entry points,
 So that the community can contribute hardware support without modifying core code.
-
-**Acceptance Criteria:**
-
-**Given** I create a file `dynamixel.py` implementing `DynamixelPlugin(ServoProtocol)` with all required methods
-**When** I place it in `armos/hal/plugins/`
-**Then** `ServoProtocol.get_plugin("dynamixel")` returns the plugin
-**And** all CLI commands work with the Dynamixel plugin (detect, calibrate, teleop, diagnose)
-
-**Given** the `ServoProtocol` ABC is documented
-**When** a community developer reads the documentation
-**Then** they can implement a new protocol in under 500 lines of code (NFR18)
-**And** the ABC has fewer than 10 required abstract methods
 
 **Size:** L
 **Dependencies:** 2.1
@@ -1236,21 +1428,6 @@ As a **user**,
 I want to create a new robot profile through a guided workflow and export it for sharing,
 So that I can use armOS with custom hardware and share my configuration with others.
 
-**Acceptance Criteria:**
-
-**Given** I have an unsupported robot configuration
-**When** I run `armos profile create`
-**Then** the system guides me through: specifying arm count, joints per arm, servo IDs, joint names, position limits, and protection settings
-**And** the resulting profile is saved as a YAML file in `~/.config/armos/profiles/`
-
-**Given** I have a working profile
-**When** I run `armos profile export my-robot --output my-robot.yaml`
-**Then** a standalone YAML file is created that can be imported on another armOS installation
-
-**Given** I received a profile YAML from someone else
-**When** I run `armos profile import my-robot.yaml`
-**Then** the profile is validated, copied to the profiles directory, and available for use
-
 **Size:** L
 **Dependencies:** 3.1, 3.2
 
@@ -1261,20 +1438,6 @@ So that I can use armOS with custom hardware and share my configuration with oth
 As a **user**,
 I want to configure teleoperation parameters (speed scaling, deadband), review recorded episodes, and see live camera feeds,
 So that I have full control over my data collection workflow.
-
-**Acceptance Criteria:**
-
-**Given** teleoperation is running
-**When** I have configured speed_scaling=0.5 in my profile or via `armos teleop --speed 0.5`
-**Then** the follower arm moves at half the speed of the leader arm
-
-**Given** I have recorded datasets
-**When** I run `armos record --review pick_and_place --episode 5`
-**Then** the system replays episode 5, showing servo positions over time
-
-**Given** USB cameras are detected
-**When** I run `armos monitor --cameras`
-**Then** camera device paths and capabilities are displayed
 
 **Size:** L
 **Dependencies:** 6.2, 9.3, 6.4
@@ -1287,17 +1450,6 @@ As an **educator**,
 I want to clone a configured USB image (with my profiles and calibrations) to multiple USB sticks,
 So that I can set up a classroom of identical robot stations quickly.
 
-**Acceptance Criteria:**
-
-**Given** I have a configured armOS USB drive with calibration data
-**When** I run `armos image clone --target /dev/sdc`
-**Then** the entire USB drive (including persistent data) is cloned to the target
-**And** the cloned drive boots identically to the source
-
-**Given** I want to clone without user-specific data
-**When** I run `armos image clone --clean --target /dev/sdc`
-**Then** the cloned drive has the base image with profiles but no calibration data or datasets
-
 **Size:** M
 **Dependencies:** 8.1b, 8.2
 
@@ -1309,19 +1461,152 @@ As a **user**,
 I want to launch an AI troubleshooting session that automatically provides Claude Code with my current system state (detected hardware, recent errors, servo telemetry),
 So that I get context-aware diagnostic assistance without manually copying data.
 
-**Acceptance Criteria:**
-
-**Given** my robot is connected and has recent diagnostic results
-**When** I run `armos ai-assist`
-**Then** the system writes a context file containing: detected hardware, active profile, last diagnostic results, recent telemetry alerts, and error logs
-**And** Claude Code is launched with this context file pre-loaded
-
-**Given** a servo fault occurred in the last session
-**When** the AI-assist context is generated
-**Then** the fault details (servo ID, fault type, timestamp, telemetry at time of fault) are included
-
 **Size:** M
 **Dependencies:** 9.1, 4.3, 5.3
+
+---
+
+## Epic 11: Business Enablement
+
+**Goal:** Implement business-critical features that drive revenue, community growth, and the data flywheel: anonymous telemetry for product analytics, cloud training upload hooks, community profile sharing, fleet deployment tooling, and OTA updates. All features require explicit user consent before transmitting any data.
+
+**Migration Phase:** F (Growth)
+**Product Scope:** Growth (v0.5)
+
+### Story 11.1: Anonymous Telemetry Collection (Opt-in)
+
+As a **product owner**,
+I want armOS to collect anonymous usage telemetry (hardware detected, boot count, teleop session duration, diagnostic pass/fail rates) with explicit opt-in,
+So that we can track adoption metrics, identify the most common hardware configurations, and prioritize support.
+
+**Acceptance Criteria:**
+
+**Given** the user has opted in via the first-run wizard or `armos telemetry on`
+**When** events occur (boot, teleop session, diagnostic run)
+**Then** events are queued to a local SQLite file (`~/.local/share/armos/telemetry.db`)
+**And** events are batched and uploaded via HTTPS POST when internet is available (never blocks offline workflows)
+
+**Given** a user wants to inspect what data would be sent
+**When** they run `armos telemetry show`
+**Then** the exact pending events are displayed
+
+**Given** a user wants to disable telemetry
+**When** they run `armos telemetry off`
+**Then** collection is disabled and the local queue is deleted
+
+**Given** telemetry is enabled
+**When** hardware serial numbers are included in events
+**Then** they are hashed with a per-install salt (no PII)
+
+**Size:** L
+**Dependencies:** Settings system (from 7.0 opt-in), backend service
+**Implements:** FR46
+
+---
+
+### Story 11.2: Cloud Training Upload Hook
+
+As a **user who has collected demonstration data**,
+I want to upload my dataset to armOS Cloud for GPU training and download the trained policy,
+So that I can go from data collection to a working policy without setting up a GPU environment.
+
+**Acceptance Criteria:**
+
+**Given** I have a collected dataset
+**When** I run `armos cloud upload --dataset ./my-dataset`
+**Then** the dataset is uploaded via resumable multipart upload to the cloud service
+
+**Given** a training job is in progress
+**When** I run `armos cloud status`
+**Then** I see training job progress
+
+**Given** a training job is complete
+**When** I run `armos cloud download --job <id>`
+**Then** the trained policy checkpoint is retrieved
+
+**Given** no internet is available
+**When** I attempt to upload
+**Then** a clear error is shown: "No internet connection. Dataset saved locally at /path."
+
+**Size:** XL
+**Dependencies:** 9.3 (data collection), cloud backend (separate project)
+**Implements:** FR47
+
+---
+
+### Story 11.3: Profile Sharing via HuggingFace Hub
+
+As a **community member who has tuned a robot profile**,
+I want to publish my profile to a shared repository and browse/download profiles others have published,
+So that new users can get pre-tuned configs for their specific hardware setup.
+
+**Acceptance Criteria:**
+
+**Given** I have a working profile
+**When** I run `armos profile publish --name "so101-wowrobo-resin"`
+**Then** the profile YAML + calibration is pushed to HuggingFace Hub under the `armos-community/profiles` organization
+
+**Given** I want to find profiles
+**When** I run `armos profile search "so101"`
+**Then** matching profiles are listed from the Hub with star counts and last-updated dates
+
+**Given** I find a profile I want
+**When** I run `armos profile install <hub-id>`
+**Then** the profile is downloaded, validated against the JSON schema, and installed to `~/.config/armos/profiles/`
+
+**Size:** L
+**Dependencies:** 3.1, HuggingFace Hub API
+**Implements:** FR48
+
+---
+
+### Story 11.4: Fleet Deployment Config Export/Import
+
+As an **educator setting up 30 armOS stations**,
+I want to configure one USB stick and clone its state (calibrations, profiles, settings) to all others,
+So that I do not have to configure each station individually.
+
+**Acceptance Criteria:**
+
+**Given** a configured armOS station
+**When** I run `armos fleet export`
+**Then** a `.armos-config.tar.gz` is created containing all user-writable state
+
+**Given** a config bundle
+**When** I run `armos fleet import <file>`
+**Then** the config is applied to the current machine
+**And** calibration data is marked as "needs re-validation"
+
+**Given** the flash script
+**When** I run `flash.ps1 --config <file>`
+**Then** the config bundle is embedded into the image during flashing
+
+**Size:** M
+**Dependencies:** 8.2, 8.3
+**Implements:** FR49
+
+---
+
+### Story 11.5: armos update Command
+
+As a **user**,
+I want to update the armos Python package on my USB stick without re-flashing,
+So that I can get bug fixes and new features with a single command.
+
+**Acceptance Criteria:**
+
+**Given** a newer version of armos is available on PyPI
+**When** I run `armos update --check`
+**Then** the available update is displayed with release notes
+
+**Given** I want to update
+**When** I run `armos update --apply`
+**Then** the new version is installed to the persistent partition's virtualenv
+**And** the new version is verified before committing
+
+**Size:** M
+**Dependencies:** 8.2 (persistent partition)
+**Implements:** FR55
 
 ---
 
@@ -1353,8 +1638,10 @@ Epic 1 (Package Skeleton)
                     v
                Epic 8 (USB Image)
                     |
-                    v
-               Epic 10 (Growth)
+          +---------+---------+
+          |                   |
+          v                   v
+     Epic 10 (Growth)   Epic 11 (Business)
 ```
 
 ---
@@ -1365,16 +1652,18 @@ Epic 1 (Package Skeleton)
 |------|---------|---|---|---|----|----|
 | 0: Sprint 0 | 2 | 1 | 1 | 0 | 0 | 4 |
 | 1: Package Skeleton | 5 | 5 | 0 | 0 | 0 | 5 |
-| 2: HAL - Feetech | 4 | 0 | 3 | 1 | 0 | 12 |
+| 2: HAL - Feetech | 5 | 0 | 4 | 1 | 0 | 17 |
 | 3: Profiles - SO-101 | 5 | 2 | 3 | 0 | 0 | 11 |
 | 4: Diagnostics | 5 | 0 | 3 | 2 | 0 | 19 |
-| 5: Telemetry | 3 | 1 | 1 | 1 | 0 | 7 |
-| 6: Calibration & Teleop | 4 | 0 | 3 | 1 | 0 | 12 |
-| 7: TUI Launcher | 4 | 0 | 2 | 2 | 0 | 14 |
-| 8: USB Image | 6 | 2 | 2 | 2 | 0 | 18 |
-| 9: AI & Data | 3 | 1 | 1 | 1 | 0 | 7 |
-| 10: Growth | 6 | 0 | 2 | 4 | 0 | 18 |
-| **Total** | **47** | **12** | **21** | **14** | **0** | **127** |
+| 5: Telemetry | 3 | 1 | 1 | 1 | 0 | 9 |
+| 6: Calibration & Teleop | 4 | 0 | 3 | 1 | 0 | 14 |
+| 7: TUI Launcher | 5 | 0 | 3 | 2 | 0 | 17 |
+| 8: USB Image | 10 | 3 | 5 | 2 | 0 | 27 |
+| 9: AI & Data | 3 | 1 | 1 | 1 | 0 | 8 |
+| **MVP Total** | **47** | **13** | **24** | **10** | **0** | **131** |
+| 10: Growth | 6 | 0 | 2 | 4 | 0 | 26 |
+| 11: Business | 5 | 0 | 2 | 2 | 1 | 19 |
+| **Grand Total** | **58** | **13** | **28** | **16** | **1** | **176** |
 
 *Weight: S=1, M=3, L=5, XL=8
 
@@ -1429,7 +1718,18 @@ Epic 1 (Package Skeleton)
 | FR42 | 6.2 | 6 | MVP |
 | FR43 | 7.0 | 7 | MVP |
 | FR44 | 8.5 | 8 | MVP |
+| FR45 | 7.4 | 7 | MVP (launch) |
+| FR46 | 11.1 | 11 | Growth |
+| FR47 | 11.2 | 11 | Growth |
+| FR48 | 11.3 | 11 | Growth |
+| FR49 | 11.4 | 11 | Growth |
+| FR50 | 8.8 | 8 | MVP |
+| FR51 | 8.9 | 8 | MVP |
+| FR52 | 8.6 | 8 | MVP |
+| FR53 | 8.7 | 8 | MVP |
+| FR54 | 2.5 | 2 | MVP |
+| FR55 | 11.5 | 11 | Growth |
 
 ---
 
-_Epic breakdown for armOS USB -- a universal robot operating system on a bootable USB stick._
+_Epic breakdown for armOS USB v2.0 -- consolidated from planning, reviews, and implementation enhancements._

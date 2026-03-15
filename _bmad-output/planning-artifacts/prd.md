@@ -14,11 +14,16 @@ stepsCompleted:
   - step-10-nonfunctional
   - step-11-polish
   - step-12-complete
+  - step-13-consolidation
 inputDocuments:
   - product-brief.md
   - project-overview.md
   - README.md
   - CLAUDE.md
+  - prd-enhancements.md
+  - review-pm.md
+  - review-qa.md
+  - strategy-content-enhancements.md
 workflowType: 'prd'
 ---
 
@@ -26,6 +31,7 @@ workflowType: 'prd'
 
 **Author:** Bradley
 **Date:** 2026-03-15
+**Version:** 2.0 (Consolidated -- integrates PM enhancements, QA fixes, competitive positioning, and expanded metrics)
 
 ## Executive Summary
 
@@ -37,6 +43,49 @@ The project evolves from an existing single-purpose tool (Surface Pro 7 + SO-101
 
 **Target users:** Robotics hobbyists, AI researchers collecting training data, educators teaching physical robotics, and makers building custom robot platforms.
 
+**Competitive position:** armOS owns the "low complexity, affordable hardware" quadrant. phosphobot requires $995+ kits and cloud connectivity. ROS2 requires a PhD-level tolerance for configuration. LeRobot (bare) requires a working Linux environment. armOS is the only product where you insert a USB stick and have a working robot in 5 minutes.
+
+## Competitive Positioning
+
+### Feature Comparison
+
+| Capability | armOS | Foxglove | ROS2 + MoveIt2 | LeRobot (bare) | phosphobot | NVIDIA Isaac |
+|---|---|---|---|---|---|---|
+| **Setup time** | <5 min (USB boot) | 15-30 min (install) | 4-8 hours | 1-3 hours | 30-60 min (their kit) | 2-4 hours (GPU required) |
+| **Target hardware cost** | $0 (any x86 laptop) | $0 (any machine) | $0 (any machine) | $0 (any machine) | $995+ (their kits) | $500+ (needs NVIDIA GPU) |
+| **Robot arm support** | SO-101 (MVP), Dynamixel (Growth) | N/A (viz only) | 50+ (URDF-based) | SO-101, Koch, Aloha | SO-100, SO-101, Unitree Go2 | Industrial arms |
+| **Servo diagnostics** | Real-time voltage, temp, load, comms | Log replay only | No built-in for hobby servos | None | Basic status | Industrial-grade |
+| **Data collection** | Built-in (LeRobot format) | No | Rosbag (different format) | Built-in (native) | Built-in | SIM-focused |
+| **Cloud training** | Planned (Year 2) | No | No | HuggingFace Hub | PRO subscription | Omniverse |
+| **Offline operation** | Full (after first boot) | Partial | Full | Full | Requires internet for cloud | Partial |
+| **License** | Apache 2.0 (planned) | Freemium ($18-90/user/mo) | Apache 2.0 | Apache 2.0 | Proprietary + open agent | Proprietary |
+| **Primary user** | Hobbyist, educator, new researcher | Robotics engineer | Robotics engineer, researcher | ML researcher | Hobbyist, educator | Enterprise, researcher |
+
+### Head-to-Head: armOS vs. phosphobot
+
+| Dimension | armOS | phosphobot | Verdict |
+|---|---|---|---|
+| Price to start | Free (download ISO) | $995+ (buy their kit) | armOS wins |
+| Hardware lock-in | None (BYOH) | Their kits preferred | armOS wins |
+| VR teleoperation | No | Meta Quest support | phosphobot wins |
+| Servo diagnostics | Deep (voltage, temp, load, comms) | Basic | armOS wins |
+| Cloud training | Planned | Available now (PRO tier) | phosphobot wins (for now) |
+| Community size | 0 (pre-launch) | 1,000+ claimed robots | phosphobot wins (for now) |
+| Offline capability | Full | Internet required for cloud | armOS wins |
+| Open source depth | Full OS + drivers + diagnostics | Open agent, closed platform | armOS wins |
+
+**Positioning statement:** phosphobot sells a vertically integrated platform -- their hardware, their software, their cloud. armOS is the horizontal layer -- it works with any hardware, on any laptop, for free. We are the Android to their iPhone. They will capture the high end; we will capture the long tail.
+
+### HuggingFace/Pollen Robotics Acquisition
+
+HuggingFace acquired Pollen Robotics and released Reachy Mini and HopeJr. This is both an opportunity and a risk.
+
+**Risk:** HuggingFace could build their own "LeRobot OS" backed by their 22k-star community and $4.5B valuation.
+
+**Mitigation:** Position armOS as the *community* deployment tool for LeRobot, not a competitor to HuggingFace's own hardware. Engage the LeRobot team immediately. Upstream patches. The ideal outcome is a mention in LeRobot's README.
+
+**Opportunity:** armOS profiles for Reachy Mini and HopeJr could make us a natural partner rather than a competitor.
+
 ## Success Criteria
 
 - **SC1:** A new user boots the USB on untested x86 hardware and reaches working robot teleoperation in under 5 minutes (excluding first-time calibration), measured from BIOS boot to first successful leader-follower movement with pre-existing calibration.
@@ -44,9 +93,17 @@ The project evolves from an existing single-purpose tool (Surface Pro 7 + SO-101
 - **SC3:** The system supports 3 or more servo protocols (Feetech STS3215, Dynamixel XL330, Dynamixel XL430) by v1.0 release.
 - **SC4:** Zero manual terminal commands are required for basic operation (boot, detect hardware, calibrate, teleop, collect data) -- all accessible through a dashboard interface.
 - **SC5:** The OS image boots successfully on 90% or more of tested x86 laptops and desktops (target: 20+ distinct hardware models validated).
-- **SC6:** Community adoption reaches 100+ GitHub stars within 6 months of public release.
+- **SC6:** Community adoption reaches 500+ GitHub stars within 6 months of public release.
 - **SC7:** Servo diagnostic suite detects and reports hardware faults (voltage sag, overload, communication failure) within 2 seconds of occurrence.
 - **SC8:** Offline operation is fully functional after initial USB creation -- no internet required for boot, hardware detection, calibration, teleoperation, or data collection.
+- **SC9:** Active users (booted armOS and completed teleop at least once) reach 50+ within 6 months, tracked via opt-in telemetry or self-reported survey.
+- **SC10:** USB image downloads reach 1,000+ within 6 months, measured via GitHub release download count.
+- **SC11:** Community-contributed robot profiles reach 5+ within 12 months.
+- **SC12:** At least 1 university pilot deployment within 12 months (target: Georgia Tech ECE 4560 or equivalent).
+- **SC13:** At least 1 signed hardware partnership LOI within 12 months (target: Seeed Studio).
+- **SC14:** armOS USB distributed at 3+ hackathon events within 12 months.
+- **SC15:** 10+ users completing cloud training runs within 15 months of launch.
+- **SC16:** $1K monthly recurring revenue within 18 months (sources: cloud training + education pilot + USB sales).
 
 ## Product Scope
 
@@ -61,6 +118,12 @@ Harden the existing Surface Pro 7 + SO-101 pipeline into a reproducible, pre-bui
 - USB camera detection and V4L2 configuration
 - Data collection pipeline for recording LeRobot-compatible datasets (P0 -- critical for AI researcher persona)
 - Claude Code context files pre-seeded for AI-assisted troubleshooting
+- Hackathon Mode -- streamlined first-run flow that skips advanced options (FR48)
+- Demo Mode -- pre-loaded SO-101 replay trajectories for demos without trained policies (FR49)
+- "What's Next?" onboarding panel with links to resources and next steps (FR54)
+- Demo Mode launcher in TUI dashboard (FR66)
+
+**MVP Functional Requirements:** FR1 (CH340 only), FR2, FR3 (single-profile matching for SO-101), FR4, FR6, FR7, FR10, FR11, FR12, FR13, FR14, FR15, FR16, FR17, FR19, FR20, FR21, FR22, FR23, FR24, FR25, FR27, FR28, FR29, FR30, FR31, FR33 (TUI version), FR34 (TUI version), FR36, FR37, FR42, FR43, FR44, FR48, FR49, FR54, FR66.
 
 ### Growth (v0.5) -- Multi-Hardware Support
 
@@ -69,9 +132,24 @@ Extend beyond SO-101 to support multiple robot platforms and host hardware.
 - Hardware auto-detection layer (USB device enumeration, servo protocol identification, camera enumeration)
 - Robot profile system (YAML-based hardware descriptions for SO-101, Koch v1.1)
 - Universal robot API abstracting Feetech and Dynamixel protocols
-- Full-featured TUI dashboard with real-time telemetry, multi-robot support, and advanced configuration (MVP ships a basic TUI launcher menu)
+- Full-featured TUI dashboard with real-time telemetry, multi-robot support, and advanced configuration
 - Support for 5+ x86 hardware targets (not just Surface Pro 7)
 - Plugin architecture for adding new servo protocols
+- Fleet Mode image export with locked-down classroom configuration (FR45, FR47)
+- Fleet Dashboard for local network station monitoring (FR46)
+- One-click dataset upload to armOS Cloud or HuggingFace Hub (FR50)
+- One-click policy download and deployment (FR51)
+- Co-branded boot splash configurable per hardware partner (FR52)
+- Partner quickstart URL embedded in boot splash (FR53)
+- Opt-in telemetry consent and anonymous reporting (FR55, FR56, FR57)
+- Dataset export to HuggingFace Hub with zero-config flow (FR59)
+- armOS Cloud training submission from dashboard (FR60)
+- Policy deployment from cloud (FR61)
+- Profile export as .armos file and import from file or URL (FR62, FR63)
+- Screen recording integration (FR67)
+- Reachy Mini and HopeJr robot profiles (FR68, contingent on partnership)
+
+**Growth Functional Requirements:** FR5, FR8, FR9, FR18, FR26, FR32, FR35, FR38, FR39, FR40, FR45, FR46, FR47, FR50, FR51, FR52, FR53, FR55, FR56, FR57, FR58, FR59, FR60, FR61, FR62, FR63, FR67, FR68.
 
 ### Vision (v1.0) -- Universal Robot OS
 
@@ -82,8 +160,11 @@ Full platform with broad hardware support, community ecosystem, and zero-config 
 - 3+ servo protocol drivers
 - Community profile repository (users contribute hardware profiles)
 - Offline AI assistant for troubleshooting and guided calibration
-- Data collection pipeline with local dataset management
 - One-click cloud training upload integration
+- Community profile browser and contribution workflow (FR64, FR65)
+- Pro tier feature gating for power users (FR69)
+
+**Vision Functional Requirements:** FR41, FR64, FR65, FR69.
 
 ## User Journeys
 
@@ -101,7 +182,7 @@ Full platform with broad hardware support, community ecosystem, and zero-config 
 7. User selects "Calibrate" from the dashboard. System guides user through homing each joint.
 8. User selects "Teleop." System launches leader-follower teleoperation. User moves the leader arm and the follower arm mirrors movements.
 
-**Success:** Boot to teleop in under 5 minutes. No terminal commands. [Traces to SC1, SC4]
+**Success:** Boot to teleop in under 5 minutes (with pre-existing calibration). No terminal commands. [Traces to SC1, SC4]
 
 ### UJ2: Hardware Diagnosis (Hobbyist with Problem)
 
@@ -159,6 +240,62 @@ Full platform with broad hardware support, community ecosystem, and zero-config 
 
 **Success:** 10 stations operational in under 30 minutes total. All running identical, reproducible environments. [Traces to SC1, SC4, SC5]
 
+### UJ6: Educator Deploying 30 Arms (Classroom Fleet)
+
+**Actor:** University instructor setting up a robotics lab for ECE 4560 (like Georgia Tech).
+**Context:** The education market is $1.8B and growing at 18.1% CAGR. This journey must be frictionless enough for a TA to execute, not just the professor.
+
+1. Instructor downloads the armOS image and flashes one USB stick.
+2. Instructor boots one station, connects an SO-101, runs calibration, and verifies teleop works.
+3. Instructor opens "Fleet Mode" from the TUI: exports the current profile + calibration + a locked-down configuration (no terminal access, restricted menus) as a clonable image.
+4. TA uses a batch cloning tool to flash 29 additional USB sticks from the master image.
+5. On lab day, 30 students insert USB sticks into 30 different laptops. Each boots to a branded splash screen showing the course name and lab number.
+6. Each station auto-detects its SO-101. Because the profile is pre-loaded, students skip profile matching and go straight to "Calibrate" (each physical arm needs its own calibration, but the workflow is guided and takes under 3 minutes).
+7. Instructor's station shows a "Fleet Dashboard" -- a simple grid of station status: booted, calibrating, teleoping, error. Requires local network (DHCP on a lab switch). No internet required.
+8. When a student's station shows an error, the fleet dashboard surfaces the diagnostic message (e.g., "Station 14: Servo 3 voltage sag -- check power supply").
+9. At end of semester, instructor collects all USB sticks. Student data is on the sticks. No data leaves the lab network.
+
+**New FRs:** FR45 (Fleet Mode image export), FR46 (Fleet Dashboard), FR47 (Locked-down classroom configuration).
+**Phase:** Fleet Dashboard is Growth (v0.5). Image cloning and locked-down config should be pulled into late MVP or v0.1.1.
+**Success:** 30 stations operational in under 60 minutes (2 minutes per station average). Instructor can monitor all stations from one screen. [Traces to SC5, SC12]
+
+### UJ7: Hackathon Participant (Zero to Demo in 2 Hours)
+
+**Actor:** One of the 3,000+ LeRobot hackathon participants who just received an SO-101 kit at a hackathon venue.
+**Context:** The LeRobot hackathon across 100+ cities is the single largest concentration of our target users.
+
+1. Participant receives an SO-101 kit and an armOS USB stick (distributed by event organizers or downloaded from armOS.dev QR code).
+2. Participant plugs USB into their personal laptop (unknown hardware).
+3. System boots. If boot fails, the boot splash shows a "press [key] for boot menu" message tailored to the top 5 laptop brands detected from SMBIOS data.
+4. Hardware is detected. System enters "Hackathon Mode" -- a streamlined flow that skips advanced options and goes straight to: Calibrate > Teleop > Collect Data.
+5. After 30 minutes of data collection, participant wants to train a policy. System shows: "Training requires a GPU. Upload your dataset to armOS Cloud or HuggingFace Hub." One-click upload (requires WiFi).
+6. While waiting for training, participant explores "Demo Mode" -- pre-loaded example policies that show what a trained arm can do (replay of pick-and-place, wave, or sorting tasks using pre-recorded trajectories).
+7. Training completes. Participant downloads the policy, loads it via the dashboard, and runs inference.
+8. Participant shares their profile + trained policy to the armOS community hub with one click.
+
+**New FRs:** FR48 (Hackathon Mode), FR49 (Demo Mode), FR50 (One-click dataset upload), FR51 (One-click policy download).
+**Phase:** Hackathon Mode (FR48) and Demo Mode (FR49) are MVP. Cloud upload/download (FR50, FR51) is Growth, with placeholder UI in MVP.
+**Success:** Participant goes from unboxing to autonomous policy execution in under 2 hours. Zero terminal commands. [Traces to SC1, SC14]
+
+### UJ8: Seeed Studio Customer Unboxing
+
+**Actor:** Customer who just received an SO-101 Pro kit ($240) from Seeed Studio, with an armOS USB stick included in the box.
+**Context:** This is the hardware partnership revenue model ($3-5 per USB stick).
+
+1. Customer opens the SO-101 Pro box. Inside: servo kit, cables, screws, 3D printed parts, and a small armOS USB stick in a branded sleeve with a QR code.
+2. QR code links to armOS.dev/seeed-quickstart -- a single page with a 90-second video and three steps: assemble, plug in USB, boot and connect.
+3. Customer assembles the arm following Seeed's existing assembly guide.
+4. Customer plugs the armOS USB into their laptop and boots.
+5. System boots to a Seeed-cobranded splash screen ("Powered by armOS -- Seeed Studio SO-101 Edition").
+6. System detects the SO-101 hardware. The SO-101 profile is pre-loaded and pre-selected.
+7. Guided calibration walks the customer through homing each joint with visual diagrams.
+8. Customer completes calibration, starts teleop, and moves the arm within 5 minutes of first boot.
+9. Dashboard shows a "What's Next?" panel: links to the HuggingFace robotics course, the armOS community Discord, and the armOS Cloud training service.
+
+**New FRs:** FR52 (Co-branded boot splash), FR53 (Partner quickstart URL), FR54 ("What's Next?" onboarding panel).
+**Phase:** Co-branding (FR52, FR53) is Growth. "What's Next?" panel (FR54) is MVP for all users.
+**Success:** Seeed customer reaches teleop in under 5 minutes. Seeed support tickets for SO-101 setup drop by 50%+. [Traces to SC1, SC13]
+
 ## Domain Model
 
 ### Core Entities
@@ -205,7 +342,7 @@ Camera 1---1 USB Port (auto-detected)
 - **FR3:** The system can match a detected hardware configuration (servo count, protocol type, bus topology) against the installed profile library and suggest the best-matching robot profile.
 - **FR4:** The system can detect USB cameras via V4L2 and enumerate their capabilities (resolutions, frame rates, device paths).
 - **FR5:** The system can assign detected controllers and cameras to profile-defined roles (leader arm, follower arm, wrist camera, etc.) with user confirmation.
-- **FR6:** The system can configure udev rules and serial port permissions automatically, without requiring manual terminal commands or root access from the user.
+- **FR6:** The system can configure udev rules and serial port permissions automatically, without requiring manual terminal commands or root access from the user. Permissions use `MODE="0660"` and `GROUP="armos"`, not world-writable `0666`.
 
 ### Robot Profiles
 
@@ -219,7 +356,7 @@ Camera 1---1 USB Port (auto-detected)
 
 - **FR12:** Users can calibrate each arm through a guided procedure that moves joints to reference positions and records the servo register values.
 - **FR13:** The system can store and recall calibration data per arm, persisting across reboots.
-- **FR14:** The system can validate stored calibration against current servo positions and warn if any joint deviates by more than 20% from its calibrated range, or if a servo fails to respond within 2 seconds (stale = no response for >2 seconds).
+- **FR14:** The system can validate stored calibration against current servo positions and warn if any joint deviates by more than 20% of its calibrated range width, or if a servo fails to respond within 2 seconds (stale = no response for >2 seconds).
 
 ### Teleoperation
 
@@ -268,9 +405,67 @@ Camera 1---1 USB Port (auto-detected)
 - **FR39:** Developers can add support for new servo protocols by implementing a defined driver interface without modifying core system code.
 - **FR40:** Developers can add new robot profiles by creating YAML files conforming to the profile schema, without modifying core system code.
 - **FR41:** The system can load third-party profiles and drivers from a designated plugin directory.
+
+### Safety
+
 - **FR42:** The teleop watchdog shall disable follower torque if the control loop stalls for more than 500ms, preventing unsafe motion from stale commands.
+
+### First-Run Experience
+
 - **FR43:** A first-run setup wizard shall auto-detect connected hardware and guide the user through initial calibration on first boot.
 - **FR44:** A Plymouth boot splash shall hide Linux boot messages, presenting a branded boot screen to the user.
+
+### Fleet and Classroom
+
+- **FR45:** The system can export a Fleet Mode image containing the current profile, calibration, and a locked-down configuration (restricted menus, no terminal access) as a clonable image.
+- **FR46:** The system can display a Fleet Dashboard showing station status (booted, calibrating, teleoping, error) for all armOS stations on the local network via DHCP. No internet required.
+- **FR47:** The system supports a locked-down classroom configuration that restricts menus and disables terminal access for student deployments.
+
+### Hackathon and Demo
+
+- **FR48:** The system provides a Hackathon Mode -- a streamlined first-run flow that skips advanced options and guides users directly through: Calibrate > Teleop > Collect Data.
+- **FR49:** The system ships with 2-3 pre-recorded SO-101 demo trajectories (wave, pick-and-place, point-to-point) that can be replayed without a trained policy or leader arm.
+- **FR50:** Users can upload a locally collected dataset to armOS Cloud or HuggingFace Hub with one click from the dashboard.
+- **FR51:** Users can download a trained policy from armOS Cloud and load it for inference from the dashboard, with hardware compatibility verification before execution.
+
+### Hardware Partnerships
+
+- **FR52:** The system supports a co-branded boot splash configurable per hardware partner (e.g., "Powered by armOS -- Seeed Studio SO-101 Edition").
+- **FR53:** The system can embed a partner quickstart URL in the boot splash, linking to partner-specific setup documentation.
+- **FR54:** The dashboard includes a "What's Next?" onboarding panel with configurable links (HuggingFace course, community Discord, cloud training, partner-specific content).
+
+### Telemetry (Opt-In)
+
+- **FR55:** The first-run wizard includes a clear, plain-language telemetry opt-in screen. Default is OFF. Users can change their preference at any time from the dashboard settings.
+- **FR56:** When opted in, the system sends a single anonymous HTTP POST on each successful boot: hardware model (SMBIOS), boot time, kernel version, detected USB devices. No user identifier.
+- **FR57:** When opted in, the system can upload anonymized diagnostic results (servo health summary, fault types, communication reliability scores) to a central aggregation service.
+- **FR58:** An internal telemetry dashboard aggregates telemetry data for maintainers: boot success rates by hardware model, most common faults, profile usage distribution.
+
+### Cloud Training
+
+- **FR59:** Users can push a locally collected dataset to their HuggingFace account with one command or dashboard button, with guided HF CLI login flow.
+- **FR60:** Users can submit a dataset to the armOS Cloud training service from the dashboard: select dataset, choose model architecture (ACT, Diffusion Policy), confirm pricing, upload, receive notification when complete, download trained policy.
+- **FR61:** Users can download a trained policy from armOS Cloud and load it for inference from the dashboard. The system verifies hardware compatibility before attempting to run.
+
+### Profile Sharing
+
+- **FR62:** Users can export their robot profile (YAML + calibration data + custom protection settings) as a single .armos file (zip archive) shareable via email, Discord, or USB.
+- **FR63:** Users can import a .armos profile file from local storage or a URL. The system validates the profile against the schema before importing.
+- **FR64:** The dashboard includes a "Community Profiles" section that lists profiles from a central GitHub-backed repository. Users can browse, search by robot type or servo protocol, and install with one click.
+- **FR65:** Users can submit their profile to the community repository directly from the dashboard, creating a GitHub PR with the profile YAML, an optional hardware photo, and diagnostic test results.
+
+### Demo and Marketing
+
+- **FR66:** The TUI dashboard includes a prominent "Demo" button. When pressed with hardware connected, it replays pre-loaded trajectories. When pressed without hardware, it plays a video of the trajectories.
+- **FR67:** Users can record a screen capture of their armOS session (TUI + camera feeds) with one keypress. Output is an MP4 file on the USB.
+
+### Additional Robot Profiles
+
+- **FR68:** The system includes Reachy Mini and HopeJr robot profiles (contingent on HuggingFace partnership).
+
+### Monetization
+
+- **FR69:** The system supports a Pro tier feature gating mechanism. The free tier includes everything in MVP. The Pro tier adds power-user features (advanced diagnostics, priority cloud training queue, profile analytics) without affecting the core experience.
 
 ### FR Dependency Chain
 
@@ -290,6 +485,19 @@ Additional dependency links:
 - FR19 (diagnostics) depends on FR1, FR2
 - FR36 (actionable errors) depends on FR23 (fault detection)
 - FR4 (camera detection) is independent of the servo chain but required by FR24
+- FR48 (Hackathon Mode) depends on FR43 (first-run wizard)
+- FR49 (Demo Mode) depends on FR7 (profile loading) -- trajectories reference profile joint definitions
+- FR50 (dataset upload) depends on FR27 (dataset storage)
+- FR62 (profile export) depends on FR7 (profile loading) and FR13 (calibration storage)
+
+### FR Phase Summary
+
+| Phase | Functional Requirements |
+|-------|------------------------|
+| **MVP (v0.1)** | FR1 (CH340 only), FR2, FR3 (SO-101 only), FR4, FR6, FR7, FR10, FR11, FR12, FR13, FR14, FR15, FR16, FR17, FR19, FR20, FR21, FR22, FR23, FR24, FR25, FR27, FR28, FR29, FR30, FR31, FR33 (TUI), FR34 (TUI), FR36, FR37, FR42, FR43, FR44, FR48, FR49, FR54, FR66 |
+| **Late MVP / v0.1.1** | FR59 |
+| **Growth (v0.5)** | FR5, FR8, FR9, FR18, FR26, FR32, FR35, FR38, FR39, FR40, FR45, FR46, FR47, FR50, FR51, FR52, FR53, FR55, FR56, FR57, FR58, FR60, FR61, FR62, FR63, FR67, FR68 |
+| **Vision (v1.0)** | FR41, FR64, FR65, FR69 |
 
 ## Non-Functional Requirements
 
@@ -337,45 +545,37 @@ Additional dependency links:
 
 - **TC1: No GPU dependence.** The baseline target hardware is Intel integrated graphics. All compute-intensive training must be offloaded. The system is for inference, data collection, and teleoperation only.
 - **TC2: USB boot required.** The system must boot and operate entirely from a USB drive. Hard drive installation is optional, never required.
-- **TC3: Offline operation.** After initial USB creation, all core functionality must work without internet. Internet is optional for AI assistant features and dataset upload.
+- **TC3: Offline operation.** After initial USB creation, all core functionality must work without internet. Internet is optional for AI assistant features, telemetry, and dataset upload.
 - **TC4: Python-based.** The robot API, diagnostic tools, and dashboard must be implemented in Python for maximum community accessibility. System-level components (boot, udev) may use bash.
-- **TC5: LeRobot compatibility.** The universal robot API must remain compatible with LeRobot v0.5.0+ data formats and collection pipelines. armOS is a platform for LeRobot, not a replacement.
+- **TC5: LeRobot compatibility.** The universal robot API must remain compatible with LeRobot v0.5.0+ data formats and collection pipelines. armOS is a platform for LeRobot, not a replacement. Pin to exact version (0.5.0) to avoid untested upgrades.
 - **TC6: Open source.** All components must be open source. No proprietary dependencies for core functionality. Claude Code integration is optional (AI-assisted troubleshooting is a convenience, not a requirement).
 - **TC7: x86_64 only.** ARM support (Raspberry Pi, Jetson) is out of scope for v1.0. The USB boot architecture targets x86_64 UEFI systems.
 - **TC8: Single-user system.** armOS runs as a single-user desktop OS on the host machine. Multi-user, networked, or remote operation is out of scope for v1.0.
 
-## MVP Scope vs Future Phases
+## Go-to-Market Requirements
 
-### MVP (v0.1) Includes
+### Demo Mode (MVP)
 
-- Pre-built bootable USB image with Ubuntu 24.04 LTS base
-- Feetech STS3215 servo protocol driver (existing code, hardened)
-- SO-101 robot profile (2x 6-DOF arms, leader-follower)
-- USB-serial auto-detection for CH340 adapters
-- USB camera detection via V4L2
-- Existing diagnostic suite integrated as system commands
-- TUI-based launcher menu (calibrate, teleop, diagnose, monitor)
-- LeRobot v0.5.0 pre-installed
-- Calibration persistence across reboots
-- Claude Code context files pre-seeded
-- flash.ps1 updated to write pre-built image instead of Ubuntu ISO
+The 90-second demo video is the single highest-leverage marketing asset. Demo Mode makes every armOS installation a potential demo.
 
-Functional requirements in MVP: FR1 (CH340 only), FR2, FR3 (single-profile matching for SO-101), FR4, FR6, FR7, FR10, FR11, FR12, FR13, FR14, FR15, FR16, FR17, FR19, FR20, FR21, FR22, FR23, FR24, FR25, FR27, FR28, FR29, FR30, FR31, FR33 (TUI version), FR34 (TUI version), FR36, FR37.
+- **FR49:** Pre-loaded demo trajectories ship with MVP (2-3 SO-101 trajectories: wave, pick-and-place, point-to-point). These are recorded servo position sequences, not ML policies.
+- **FR66:** Demo Mode launcher provides a prominent "Demo" button on the TUI dashboard. Works with or without hardware connected.
+- **FR67:** Screen recording integration (Growth) enables users to share their experience on social media.
 
-Note: FR3 is limited to single-profile matching (SO-101 only) in MVP; full multi-profile matching is Growth. FR4 provides camera detection; FR5 (user-confirmed role assignment) is deferred -- MVP auto-assigns the first detected camera. FR14 (calibration validation) is pulled into MVP to support the calibrate workflow in Story 3.4.
+### Landing Page Requirements
 
-### MVP Excludes (Deferred)
+- **GTM-1: Landing page at armOS.dev.** Single page with: hero video (90-second boot-to-teleop), three value props (zero setup / built-in diagnostics / works on any laptop), download button, hardware compatibility list, "Star us on GitHub" CTA.
 
-- Dynamixel protocol support (Growth phase)
-- Koch and Aloha profiles (Growth phase)
-- Web-based dashboard (Vision phase)
-- Robot profile creation wizard (Growth phase)
-- Profile export/import and sharing (Growth phase)
-- Dataset review and replay in dashboard (Growth phase)
-- Plugin directory for third-party drivers (Vision phase)
-- AI troubleshooting with live system state injection (Vision phase)
-- USB image cloning tool (Growth phase)
-- Custom arm profile creation (Growth phase)
+- **GTM-2: SEO content strategy.** Three blog posts targeting specific search queries:
+  1. "brltty stealing serial ports on Ubuntu" -- targets the #1 pain point.
+  2. "SO-101 servo stuttering fix" -- targets power supply and overload issues.
+  3. "LeRobot setup guide 2026" -- targets the broadest query.
+
+- **GTM-3: 90-second video.** Continuous take, no narration, timer in corner. USB inserted > boot > detect > calibrate > teleop. Real hardware, no cuts.
+
+- **GTM-4: Hackathon distribution kit.** Downloadable package for organizers: USB image, one-page printed quickstart (PDF), table tent with QR code, and opening presentation slide deck. Targets 3,000+ LeRobot hackathon participants across 100+ cities.
+
+**Phase:** GTM-1 and GTM-3 are pre-launch. GTM-2 starts during development. GTM-4 is Growth, but the quickstart PDF should be drafted during MVP.
 
 ## Success Metrics
 
@@ -385,11 +585,31 @@ Note: FR3 is limited to single-profile matching (SO-101 only) in MVP; full multi
 | Supported robot platforms | 3+ by v1.0 | Count of shipped, tested profiles | SC2 |
 | Supported servo protocols | 3+ by v1.0 | Count of implemented, tested protocol drivers | SC3 |
 | Terminal commands for basic operation | 0 | User test: complete calibrate + teleop workflow without terminal | SC4 |
-| Hardware compatibility rate | 90%+ of tested models | Boot test matrix: 20+ x86 laptops/desktops | SC5 |
-| GitHub stars (6 months post-launch) | 100+ | GitHub repository metrics | SC6 |
+| Hardware compatibility rate | 90%+ of tested models | Boot test matrix: 20+ x86 laptops/desktops, start testing Sprint 4 | SC5 |
+| GitHub stars (6 months post-launch) | 500+ | GitHub repository metrics | SC6 |
 | Fault detection latency | Under 2 seconds | Instrumented test: disconnect servo, measure time to alert | SC7 |
 | Offline operation coverage | 100% of core workflows | Airplane mode test: boot, detect, calibrate, teleop, collect | SC8 |
+| Active users (6 months) | 50+ | Opt-in telemetry or self-reported survey (booted + completed teleop) | SC9 |
+| USB image downloads (6 months) | 1,000+ | GitHub release download count | SC10 |
+| Community-contributed profiles (12 months) | 5+ | Count of merged community profile PRs | SC11 |
+| Education pilots (12 months) | 1+ university | Signed pilot agreement | SC12 |
+| Hardware partnership LOI (12 months) | 1+ signed | Signed letter of intent (target: Seeed Studio) | SC13 |
+| Hackathon presence (12 months) | 3+ events | armOS USB distributed at events | SC14 |
+| Cloud training beta users (15 months) | 10+ completing runs | Cloud training service logs | SC15 |
+| Monthly recurring revenue (18 months) | $1K MRR | Stripe/payment processor records | SC16 |
+
+### Leading Indicators (Track from Day 1)
+
+These are not success criteria but early warning signals:
+
+| Indicator | Signal | Action If Weak |
+|-----------|--------|---------------|
+| Demo video views (first 2 weeks) | <500 views | Rethink distribution channels. Try paid promotion on r/robotics. |
+| LeRobot Discord reaction to launch post | <10 replies | The messaging is wrong. Reposition around a specific pain point. |
+| Boot failure reports (first 50 users) | >20% failure rate | Halt feature work. Focus entirely on hardware compatibility. |
+| Seeed Studio response to partnership email | No response in 2 weeks | Try Waveshare and Feetech in parallel via warm intro. |
+| Profile contributions (first 6 months) | Zero external contributions | Simplify the contribution workflow. Write example profiles to show the pattern. |
 
 ---
 
-_Product Requirements Document for armOS USB -- a universal robot operating system on a bootable USB stick._
+_Product Requirements Document v2.0 for armOS USB -- a universal robot operating system on a bootable USB stick. Consolidated from core PRD, PM enhancements, QA review fixes, and strategic content enhancements._
