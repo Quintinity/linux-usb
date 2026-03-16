@@ -511,6 +511,158 @@ USB Device Plugged In
 
 ---
 
+## Device Extension Guide
+
+Every device in armOS is a citizen. Adding support for a new device type requires **1 Python file + 1 udev rule** — no changes to the protocol, marketplace, governance, or any existing module.
+
+### How the Extension Model Works
+
+The citizenry protocol is device-agnostic. It only sees:
+- **Identity** — Ed25519 keypair (auto-generated)
+- **Capabilities** — list of strings (e.g., `["6dof_arm", "gripper"]`)
+- **Health** — float 0.0-1.0
+- **7 message types** — HEARTBEAT, DISCOVER, ADVERTISE, PROPOSE, ACCEPT/REJECT, REPORT, GOVERN
+
+Everything else — what hardware is connected, what protocol it speaks, what sensors it has — is encapsulated inside the citizen. The mesh doesn't know or care.
+
+### Extension Recipes
+
+#### New Servo Protocol (e.g., CAN-bus, Waveshare, custom)
+
+```
+1. Create: armos/hal/canbus_driver.py
+   - Implement ServoDriver ABC (connect, read/write position, torque, telemetry)
+   - ~100-200 lines
+
+2. Create: armos/hal/profiles/my_robot.json
+   - Motor IDs, home positions, protection limits, capabilities
+   - ~30 lines JSON
+
+3. Add udev rule: 99-armos-hardware.rules
+   - SUBSYSTEM=="tty", ATTRS{idVendor}=="xxxx", ENV{ARMOS_DRIVER}="canbus"
+   - 1 line
+
+4. Register in: armos/detection/device_db.py
+   - ("xxxx", "yyyy"): "canbus"
+   - 1 line
+
+Result: Plug in device → auto-detected → motors scanned → profile matched →
+        ArmCitizen created → joins mesh → marketplace routes tasks to it.
+        Skills, XP, genome, contracts, NL governance all work automatically.
+```
+
+#### New Camera Type (e.g., Intel RealSense, stereo, depth)
+
+```
+1. Create: citizenry/realsense_citizen.py
+   - Extend CameraCitizen base class
+   - Override _init_camera() to use pyrealsense2
+   - Add capabilities: ["depth_stream", "point_cloud", "video_stream"]
+   - ~150 lines
+
+2. Add udev rule for RealSense USB ID
+   - 1 line
+
+Result: Plug in → auto-detected → citizen advertises depth capabilities →
+        composition engine discovers new composites:
+          depth_stream + 6dof_arm = "depth_guided_manipulation"
+        Symbiosis contracts form automatically.
+```
+
+#### New Sensor (e.g., force/torque, IMU, temperature, LiDAR)
+
+```
+1. Create: citizenry/force_sensor_citizen.py
+   - Extend Citizen base class
+   - capabilities: ["force_torque", "contact_detection"]
+   - Read sensor via serial/I2C/SPI, publish via REPORT messages
+   - ~100 lines
+
+2. Add udev rule if USB-based
+   - 1 line
+
+Result: Sensor joins mesh → advertises capabilities →
+        composition: force_torque + 6dof_arm = "compliant_manipulation"
+        Arm citizen receives force data via symbiosis contract.
+        Immune memory learns force-based fault patterns.
+```
+
+#### New Compute Device (e.g., Jetson Nano, Coral TPU, Hailo AI HAT)
+
+```
+1. Create: citizenry/gpu_citizen.py
+   - Extend Citizen base class
+   - capabilities: ["gpu_inference", "vla_policy", "object_detection"]
+   - Accept inference tasks via PROPOSE, return results via REPORT
+   - ~200 lines
+
+Result: GPU citizen joins mesh → marketplace routes inference tasks to it →
+        camera captures frame → GPU runs detection model → arm picks object.
+        All coordinated through existing 7-message protocol.
+```
+
+#### New Actuator Type (e.g., mobile base, conveyor, linear rail)
+
+```
+1. Create: citizenry/mobile_base_citizen.py
+   - Extend Citizen base class
+   - capabilities: ["mobile_base", "navigation"]
+   - Accept movement commands via PROPOSE
+   - ~150 lines
+
+Result: Mobile base joins mesh → composition: mobile_base + 6dof_arm = "mobile_manipulation"
+        Governor can say "go to the table and pick up the cup" →
+        coordinator dispatches: base moves → camera detects → arm picks.
+```
+
+### What Happens Automatically When a New Device Joins
+
+1. **Identity**: Ed25519 keypair generated on first boot
+2. **Discovery**: mDNS advertisement + UDP multicast within seconds
+3. **Constitution**: Governor sends safety rules, device applies them
+4. **Capabilities**: Advertised to all neighbors
+5. **Composition**: Engine checks for new composite capabilities with existing citizens
+6. **Symbiosis**: Governor auto-proposes contracts between complementary citizens
+7. **Marketplace**: Device can bid on tasks matching its capabilities
+8. **Skills**: Skill tree assigned based on citizen type
+9. **Genome**: Configuration DNA created, persists across restarts
+10. **Immune Memory**: Fleet fault patterns shared immediately
+11. **Dashboard**: Appears in TUI + web dashboard automatically
+12. **NL Governance**: Existing commands like "wave hello" route to any arm citizen
+
+### What Does NOT Need to Change
+
+| Component | Changes needed for new device |
+|-----------|------------------------------|
+| Protocol (7 messages) | None |
+| Transport (UDP) | None |
+| Identity (Ed25519) | None |
+| Constitution | None (unless new safety articles needed) |
+| Marketplace | None |
+| Skill trees | Add new skill definitions (optional) |
+| Genome | None (auto-generated) |
+| Immune memory | None (learns from new device's faults) |
+| Mycelium warnings | None |
+| Dashboard | None (auto-displays new citizens) |
+| NL governance | Add new task patterns (optional) |
+| Composition rules | Add new rules for new combos (optional) |
+
+### Extension Checklist
+
+For any new device type:
+- [ ] Implement citizen class (extends `Citizen` or `ArmCitizen`)
+- [ ] Declare capabilities as string list
+- [ ] Handle PROPOSE messages for tasks you can do
+- [ ] Send REPORT messages with results
+- [ ] Add udev rule if USB-based
+- [ ] Add profile JSON if it's a known robot model
+- [ ] Register USB IDs in device_db.py
+- [ ] Add composition rules for new capability combos (optional)
+- [ ] Add NL command patterns (optional)
+- [ ] Write unit tests with mocked hardware
+
+---
+
 ## Migration from Current State
 
 The existing `citizenry/pi_citizen.py` directly uses `lerobot.motors.feetech.FeetechMotorsBus`. The HAL migration:
