@@ -32,6 +32,8 @@ from .marketplace import TaskStatus
 from .data_collection import DataCollector
 from .web_dashboard import WebDashboard
 from .recorder import TimelineRecorder, list_sessions
+from .episode_recorder import list_episodes, get_episode_summary
+from .learning_loop import get_learning_report, analyze_recent_episodes
 from .dialogue import parse_question, compose_response, CitizenVoice
 from .president import President, GovernorRecord, parse_president_command
 
@@ -344,6 +346,26 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
                         print(f"  {name} — {dur:.0f}s, {frames} frames")
                 else:
                     print(f"  {DIM}No recordings yet{RESET}")
+            elif line == "episodes":
+                eps = list_episodes(15)
+                if eps:
+                    print(f"\n{BOLD}Recent Episodes ({len(eps)}):{RESET}")
+                    for e in eps:
+                        success = f"{GREEN}✓{RESET}" if e.get("success") else f"{RED}✗{RESET}"
+                        print(f"  {success} #{e.get('episode_id', '?')} {e.get('task', '?')} — "
+                              f"{e.get('duration_s', 0):.1f}s, {e.get('frames', 0)} frames")
+                else:
+                    print(f"  {DIM}No episodes recorded yet{RESET}")
+            elif line.startswith("episode "):
+                try:
+                    ep_id = int(line.split()[1])
+                    summary = get_episode_summary(ep_id)
+                    print(f"\n{BOLD}{summary}{RESET}")
+                except (ValueError, IndexError):
+                    print(f"  {YELLOW}Usage: episode <number>{RESET}")
+            elif line in ("learn", "learning report", "what did you learn"):
+                report = get_learning_report()
+                print(f"\n{report}")
             elif line.startswith("analyze "):
                 session_name = line.split(None, 1)[1].strip()
                 print(f"  {BOLD}Analyzing {session_name}...{RESET}")
