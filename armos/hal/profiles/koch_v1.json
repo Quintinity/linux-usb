@@ -1,0 +1,21 @@
+{
+  "name": "Koch v1.1",
+  "driver": "dynamixel",
+  "motor_count": 6,
+  "motors": {
+    "shoulder_pan": {"id": 1, "model": "xl330", "range": [0, 4095], "home": 2048},
+    "shoulder_lift": {"id": 2, "model": "xl330", "range": [0, 4095], "home": 2048},
+    "elbow_flex": {"id": 3, "model": "xl330", "range": [0, 4095], "home": 2048},
+    "wrist_flex": {"id": 4, "model": "xl330", "range": [0, 4095], "home": 2048},
+    "wrist_roll": {"id": 5, "model": "xl330", "range": [0, 4095], "home": 2048},
+    "gripper": {"id": 6, "model": "xl330", "range": [0, 4095], "home": 2048}
+  },
+  "protection": {
+    "max_torque": 500,
+    "protection_current": 300,
+    "max_temperature": 70,
+    "min_voltage": 5.0
+  },
+  "capabilities": ["6dof_arm", "gripper", "dynamixel_xl330"],
+  "skills": ["basic_movement", "basic_grasp", "basic_gesture", "pick_and_place"]
+}

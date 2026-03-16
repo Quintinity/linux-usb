@@ -1,0 +1,23 @@
+{
+  "name": "SO-101",
+  "driver": "feetech",
+  "motor_count": 6,
+  "motors": {
+    "shoulder_pan": {"id": 1, "model": "sts3215", "range": [0, 4095], "home": 2048},
+    "shoulder_lift": {"id": 2, "model": "sts3215", "range": [0, 4095], "home": 1400},
+    "elbow_flex": {"id": 3, "model": "sts3215", "range": [0, 4095], "home": 3000},
+    "wrist_flex": {"id": 4, "model": "sts3215", "range": [0, 4095], "home": 2048},
+    "wrist_roll": {"id": 5, "model": "sts3215", "range": [0, 4095], "home": 2048},
+    "gripper": {"id": 6, "model": "sts3215", "range": [0, 4095], "home": 2048}
+  },
+  "protection": {
+    "max_torque": 500,
+    "protection_current": 250,
+    "max_temperature": 65,
+    "overload_torque": 90,
+    "protective_torque": 50,
+    "min_voltage": 6.0
+  },
+  "capabilities": ["6dof_arm", "gripper", "feetech_sts3215"],
+  "skills": ["basic_movement", "basic_grasp", "basic_gesture", "pick_and_place"]
+}
