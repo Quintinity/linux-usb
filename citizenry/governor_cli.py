@@ -205,8 +205,32 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
                         print(f"  {GREEN}●{RESET} {prov} ←→ {cons} = {CYAN}{c.composite_capability}{RESET}")
                 else:
                     print(f"  {DIM}No active contracts{RESET}")
+            elif line == "locations":
+                locs = surface.location_registry.to_list()
+                print(f"\n{BOLD}Locations ({len(locs)}):{RESET}")
+                for l in locs:
+                    local = " (local)" if l["id"] == surface.location_registry.local_location_id else ""
+                    print(f"  {GREEN}●{RESET} {l['name']}{local} — {l.get('subnet', '?')}")
+            elif line == "weights":
+                count = surface.weight_registry.count()
+                if count:
+                    print(f"\n{BOLD}Model Weights ({count}):{RESET}")
+                    for e in surface.weight_registry.to_list():
+                        print(f"  {e['model_type']} v{e['version']} — {e.get('metrics', {})}")
+                else:
+                    print(f"  {DIM}No model weights registered{RESET}")
             elif line == "dashboard":
                 print(f"  {GREEN}http://0.0.0.0:8080{RESET}")
+            elif line in ("policy history", "history"):
+                entries = aide.get_policy_history(10)
+                if entries:
+                    print(f"\n{BOLD}Policy History (last {len(entries)}):{RESET}")
+                    for e in entries:
+                        conf = e.get("confidence", 0)
+                        auto = "auto" if e.get("auto_applied") else "manual"
+                        print(f"  {DIM}{e.get('command', '?')}{RESET} → {e.get('explanation', '?')} ({conf:.0%}, {auto})")
+                else:
+                    print(f"  {DIM}No policy changes yet{RESET}")
             elif line == "wills":
                 archive = surface.get_will_archive()
                 if archive:

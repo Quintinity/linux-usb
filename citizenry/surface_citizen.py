@@ -92,6 +92,18 @@ class SurfaceCitizen(Citizen):
         from .rolling_update import RollingUpdater
         self._rolling_updater = RollingUpdater(self)
 
+        # v3.0: Federated learning weight registry
+        from .federated import WeightRegistry
+        self.weight_registry = WeightRegistry()
+
+        # v3.0: Multi-location registry
+        from .multi_location import LocationRegistry, Location
+        self.location_registry = LocationRegistry()
+        self.location_registry.register(Location(
+            id="local", name="Local Network", subnet="192.168.1.0/24",
+        ))
+        self.location_registry.set_local("local")
+
     async def start(self):
         # Create and sign the constitution
         self._init_constitution()
@@ -294,6 +306,26 @@ class SurfaceCitizen(Citizen):
 
             # Archive the will
             self._archive_will(body)
+            return
+
+        # v3.0: Model weight announcement (federated learning)
+        if report_type == "model_weights_available":
+            envelope_data = body.get("envelope", {})
+            try:
+                from .federated import ModelWeightEnvelope
+                envelope = ModelWeightEnvelope.from_dict(envelope_data)
+                self.weight_registry.register(envelope)
+                self._log(f"weights registered: {envelope.model_type} v{envelope.version} from [{_sid(env)}]")
+                self._add_log("FEDERATED", _sid(env), f"weights: {envelope.model_type} v{envelope.version}")
+            except Exception as e:
+                self._log(f"weight registration failed: {e}")
+            return
+
+        # v3.0: Consciousness stream
+        if report_type == "consciousness":
+            narration = body.get("narration", "")
+            citizen_name = body.get("citizen", _sid(env))
+            self._add_log("CONSCIOUSNESS", citizen_name, narration)
             return
 
         # v3.0: Calibration result from Pi

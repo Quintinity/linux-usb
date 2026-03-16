@@ -497,6 +497,18 @@ class Citizen:
             self._add_log("SAFETY", short_id(env.sender), "EMERGENCY STOP")
             self._on_emergency_stop(env.sender)
 
+        elif gov_type == "policy_canary":
+            self._log(f"CANARY policy from [{short_id(env.sender)}]")
+            self._handle_policy_canary(env, body)
+
+        elif gov_type == "policy_commit":
+            self._log(f"POLICY COMMITTED from [{short_id(env.sender)}]")
+            self._add_log("GOVERN", short_id(env.sender), "policy committed")
+
+        elif gov_type == "policy_rollback":
+            self._log(f"POLICY ROLLBACK from [{short_id(env.sender)}]")
+            self._add_log("GOVERN", short_id(env.sender), "policy rolled back")
+
         elif gov_type == "genome":
             genome_data = body.get("genome", {})
             try:
@@ -544,6 +556,50 @@ class Citizen:
     def _on_emergency_stop(self, sender: str):
         """Override in subclass to handle emergency stop."""
         pass
+
+    def _run_self_test(self) -> tuple[bool, str]:
+        """Run a self-test to verify citizen is functioning.
+
+        Override in subclass for hardware-specific tests.
+        Returns (passed, detail_message).
+        """
+        return True, "base self-test passed"
+
+    def _handle_policy_canary(self, env, body):
+        """Handle a canary policy update — apply, self-test, report."""
+        # Save rollback snapshot
+        rollback_laws = dict(getattr(self, 'laws', {})) if hasattr(self, 'laws') else {}
+        rollback_constitution = dict(self.constitution) if self.constitution else {}
+
+        # Apply the policy
+        policy_data = body.get("policy_data", {})
+        law_id = policy_data.get("law_id", "")
+        params = policy_data.get("params", {})
+        if law_id:
+            self._on_law_updated(env.sender, law_id, params)
+
+        # Run self-test
+        passed, detail = self._run_self_test()
+
+        if not passed:
+            # Revert
+            if hasattr(self, 'laws') and law_id in rollback_laws:
+                self._on_law_updated(env.sender, law_id, rollback_laws[law_id])
+            self._log(f"canary FAILED — reverted: {detail}")
+
+        # Report result
+        report = {
+            "type": "canary_result",
+            "citizen": self.name,
+            "passed": passed,
+            "detail": detail,
+            "rollout_id": body.get("rollout_id", ""),
+        }
+        sender_addr = None
+        if env.sender in self.neighbors:
+            sender_addr = self.neighbors[env.sender].addr
+        if sender_addr:
+            self.send_report(env.sender, report, sender_addr)
 
     # ── Background loops ──
 

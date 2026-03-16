@@ -264,8 +264,8 @@ def _try_llm_parse(text: str) -> GovernanceAction | None:
     return None
 
 
-def _try_claude_api(text: str) -> GovernanceAction | None:
-    """Try Claude API via anthropic SDK."""
+def _try_claude_api(text: str, governor=None) -> GovernanceAction | None:
+    """Try Claude API via anthropic SDK with rich context."""
     import json as _json
     try:
         import os
@@ -273,15 +273,28 @@ def _try_claude_api(text: str) -> GovernanceAction | None:
         if not api_key:
             return None
 
+        # Build rich context from governor state
+        context = ""
+        if governor:
+            laws = getattr(governor, 'laws', {})
+            neighbors = [
+                {"name": n.name, "type": n.citizen_type, "health": n.health, "state": n.state}
+                for n in governor.neighbors.values()
+            ]
+            context = f"""
+Current laws: {_json.dumps(laws)}
+Citizens in mesh: {_json.dumps(neighbors)}
+Constitution version: {governor.constitution.get('version', '?') if governor.constitution else 'none'}
+"""
+
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=200,
-            messages=[{"role": "user", "content": _LLM_PROMPT % text}],
+            max_tokens=300,
+            messages=[{"role": "user", "content": _LLM_PROMPT % text + context}],
         )
         raw = response.content[0].text.strip()
-        # Extract JSON from response
         for line in raw.split("\n"):
             line = line.strip()
             if line.startswith("{"):
@@ -377,17 +390,32 @@ class GovernorAide:
         result = aide.execute("sort the blocks by color")
     """
 
-    def __init__(self, governor):
+    AUTO_APPLY_THRESHOLD = 0.7
+
+    def __init__(self, governor, auto_apply: bool = False):
         self.governor = governor
+        self.auto_apply = auto_apply
         self.history: list[tuple[str, GovernanceAction | None]] = []
+        self.policy_history: list[dict] = []
+        self._load_policy_history()
 
     def execute(self, command: str) -> GovernanceAction | None:
         """Parse and execute a natural language command."""
         action = parse_command(command)
+        if action is None:
+            # Try LLM with governor context
+            action = _try_claude_api(command, self.governor)
+        if action is None:
+            action = _try_ollama(command)
+
         self.history.append((command, action))
 
         if action is None:
             return None
+
+        # Log policy changes
+        if action.action_type == "law_update":
+            self._log_policy(command, action)
 
         if action.action_type == "emergency_stop":
             self._do_emergency_stop()
@@ -463,3 +491,47 @@ class GovernorAide:
     def _do_calibrate(self):
         """Run camera-to-arm calibration."""
         print("  Calibration requires interactive mode — use governor CLI")
+
+    # ── Policy history ──
+
+    def _log_policy(self, command: str, action: GovernanceAction):
+        """Log a policy change to history."""
+        import time
+        entry = {
+            "timestamp": time.time(),
+            "command": command,
+            "action_type": action.action_type,
+            "params": action.params,
+            "confidence": action.confidence,
+            "explanation": action.explanation,
+            "auto_applied": action.confidence >= self.AUTO_APPLY_THRESHOLD and self.auto_apply,
+        }
+        self.policy_history.append(entry)
+        self._save_policy_history()
+
+    def _save_policy_history(self):
+        import json
+        from citizenry.persistence import CITIZENRY_DIR
+        CITIZENRY_DIR.mkdir(parents=True, exist_ok=True)
+        path = CITIZENRY_DIR / "policy_history.json"
+        # Keep last 200 entries
+        data = self.policy_history[-200:]
+        try:
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=2) + "\n")
+            tmp.replace(path)
+        except OSError:
+            pass
+
+    def _load_policy_history(self):
+        import json
+        from citizenry.persistence import CITIZENRY_DIR
+        path = CITIZENRY_DIR / "policy_history.json"
+        try:
+            self.policy_history = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            self.policy_history = []
+
+    def get_policy_history(self, count: int = 20) -> list[dict]:
+        """Get recent policy history entries."""
+        return self.policy_history[-count:]

@@ -111,21 +111,25 @@ def compute_bid_score(
     skill_level: int,
     current_load: float,
     health: float,
+    fatigue: float = 0.0,
     weights: dict[str, float] | None = None,
 ) -> float:
-    """Compute composite bid score.
+    """Compute composite bid score with fatigue modifier.
 
-    score = capability_weight * (skill_level / 10)
+    score = (capability_weight * (skill_level / 10)
            + availability_weight * (1 - load)
-           + health_weight * health
+           + health_weight * health) * (1.0 - 0.3 * fatigue)
 
     All components normalized to [0, 1]. Skill level capped at 10.
+    Fatigue reduces the score by up to 30% (FR-4.3).
     """
     w = {**DEFAULT_WEIGHTS, **(weights or {})}
     skill_norm = min(skill_level, 10) / 10.0
     avail = max(0.0, 1.0 - current_load)
     h = max(0.0, min(1.0, health))
-    return w["capability"] * skill_norm + w["availability"] * avail + w["health"] * h
+    base = w["capability"] * skill_norm + w["availability"] * avail + w["health"] * h
+    fatigue_modifier = 1.0 - 0.3 * max(0.0, min(1.0, fatigue))
+    return base * fatigue_modifier
 
 
 def select_winner(bids: list[Bid]) -> Bid | None:
