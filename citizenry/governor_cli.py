@@ -29,6 +29,8 @@ import time
 from .surface_citizen import SurfaceCitizen
 from .nl_governance import GovernorAide, parse_command
 from .marketplace import TaskStatus
+from .data_collection import DataCollector
+from .web_dashboard import WebDashboard
 
 BOLD = "\033[1m"
 GREEN = "\033[32m"
@@ -114,6 +116,20 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
         await asyncio.sleep(0.5)
 
     surface._update_compositions()
+
+    # Start web dashboard
+    web = WebDashboard(surface, port=8080)
+    try:
+        await web.start()
+        print(f"{GREEN}Web dashboard:{RESET} http://0.0.0.0:8080")
+    except Exception as e:
+        print(f"{DIM}Web dashboard failed: {e}{RESET}")
+        web = None
+
+    # Init data collector
+    collector = DataCollector(surface)
+    surface._data_collector = collector
+
     print_status(surface)
 
     aide = GovernorAide(surface)
@@ -138,20 +154,30 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
             elif line == "help":
                 print(f"""
 {BOLD}Commands:{RESET}
-  wave / nod / grip       Gesture tasks (arm)
-  sort the blocks         Color sorting (camera + arm)
-  what do you see         Color detection (camera)
-  take a photo            Frame capture (camera)
-  pick and place          Pick and place (arm)
-  be gentle / careful     Reduce torque
-  slow down / speed up    Adjust speed
-  set fps to N            Set teleop FPS
-  stop                    Emergency stop
-  status                  Neighborhood status
-  tasks                   Task history
-  skills                  Skill levels
-  contracts               Symbiosis contracts
-  quit                    Exit
+  {BOLD}Tasks:{RESET}
+    wave / nod / grip       Gesture tasks (arm)
+    sort the blocks         Color sorting (camera + arm)
+    what do you see         Color detection (camera)
+    take a photo            Frame capture (camera)
+    pick and place          Pick and place (arm)
+  {BOLD}Governance:{RESET}
+    be gentle / careful     Reduce torque
+    slow down / speed up    Adjust speed
+    set fps to N            Set teleop FPS
+    stop                    Emergency stop
+  {BOLD}Recording:{RESET}
+    start recording [task]  Begin data collection
+    stop recording          Save episode
+  {BOLD}Calibration:{RESET}
+    calibrate camera        Run guided calibration
+    check calibration       Validate current calibration
+  {BOLD}Info:{RESET}
+    status                  Neighborhood status
+    tasks                   Task history
+    skills                  Skill levels
+    contracts               Symbiosis contracts
+    dashboard               Web dashboard URL
+    quit                    Exit
 """)
             elif line == "status":
                 print_status(surface)
@@ -168,6 +194,39 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
                         print(f"  {GREEN}●{RESET} {prov} ←→ {cons} = {CYAN}{c.composite_capability}{RESET}")
                 else:
                     print(f"  {DIM}No active contracts{RESET}")
+            elif line == "dashboard":
+                print(f"  {GREEN}http://0.0.0.0:8080{RESET}")
+            elif line.startswith("start recording"):
+                task_label = line.replace("start recording", "").strip() or "teleoperation"
+                if collector.start_recording(task_label):
+                    print(f"  {GREEN}Recording started:{RESET} {task_label}")
+                else:
+                    print(f"  {YELLOW}Already recording{RESET}")
+            elif line in ("stop recording", "save episode"):
+                result = collector.stop_recording()
+                if "error" in result:
+                    print(f"  {YELLOW}{result['error']}{RESET}")
+                else:
+                    print(f"  {GREEN}Episode saved:{RESET} {result['frames']} frames, {result['duration_s']}s")
+            elif line in ("calibrate camera", "calibrate", "run calibration"):
+                print(f"  {BOLD}Camera calibration:{RESET}")
+                print(f"  {DIM}This requires the arm and camera to be on the same Pi.{RESET}")
+                print(f"  {DIM}The arm will move to 10 positions while the camera detects the gripper.{RESET}")
+                print(f"  {DIM}(Interactive calibration coming soon — use NL command for now){RESET}")
+                action = aide.execute("calibrate camera")
+                if action:
+                    print(f"  {GREEN}→{RESET} {action.explanation}")
+            elif line in ("check calibration",):
+                from .calibration import load_calibration
+                cal = load_calibration("calibration")
+                if cal and cal.homography:
+                    age_hrs = (time.time() - cal.timestamp) / 3600
+                    print(f"  {GREEN}Calibration loaded:{RESET} {len(cal.points)} points, error={cal.reprojection_error:.1f}")
+                    print(f"  {DIM}Age: {age_hrs:.1f} hours{RESET}")
+                    if cal.validation_error > 50:
+                        print(f"  {YELLOW}Validation error high ({cal.validation_error:.0f}) — recalibrate recommended{RESET}")
+                else:
+                    print(f"  {YELLOW}No calibration found. Run 'calibrate camera' first.{RESET}")
             else:
                 action = aide.execute(line)
                 if action:
@@ -186,6 +245,10 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
         pass
 
     print(f"\n{DIM}Shutting down...{RESET}")
+    if web:
+        await web.stop()
+    if collector.session.is_recording:
+        collector.stop_recording()
     await surface.stop()
     print(f"{GREEN}Governor offline.{RESET}")
 
