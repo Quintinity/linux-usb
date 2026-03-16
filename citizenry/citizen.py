@@ -30,6 +30,15 @@ from .genome import CitizenGenome, save_genome, load_genome
 from .symbiosis import ContractManager, SymbiosisContract, ContractStatus
 from .emotional import EmotionalState, compute_emotional_state
 from .will import CitizenWill, create_will
+from .soul import CitizenSoul
+from .memory_system import CitizenMemory
+from .improvement import PerformanceTracker, StrategySelector, FailureAnalyzer
+from .reflex import ReflexEngine
+from .metabolism import MetabolismTracker
+from .pain import PainMemory, PainEvent, compute_pain_intensity
+from .sleep_cycle import SleepEngine
+from .spatial import ZoneManager
+from .growth import GrowthTracker
 
 
 class Presence(Enum):
@@ -122,6 +131,19 @@ class Citizen:
         self.emotional_state = EmotionalState()
         self._tasks_completed_count = 0
         self._tasks_failed_count = 0
+
+        # v4.0: Biological subsystems
+        self.soul = CitizenSoul()
+        self.memory = CitizenMemory()
+        self.performance = PerformanceTracker()
+        self.strategy_selector = StrategySelector()
+        self.failure_analyzer = FailureAnalyzer()
+        self.reflex_engine = ReflexEngine()
+        self.metabolism_tracker = MetabolismTracker()
+        self.pain_memory = PainMemory()
+        self.sleep_engine = SleepEngine()
+        self.zone_manager = ZoneManager()
+        self.growth_tracker = GrowthTracker()
 
         # Message handlers — subclasses register additional handlers
         self._handlers: dict[int, list] = {
@@ -258,6 +280,10 @@ class Citizen:
             novel_neighbors=len([n for n in self.neighbors.values() if time.time() - n.last_seen < 60]),
         )
         body["emotional_state"] = self.emotional_state.to_dict()
+        # v4.0: soul mood + growth stage + sleep state in heartbeat
+        body["soul_mood"] = self.soul.personality.to_dict().get("movement_style", 0.5)
+        body["growth_stage"] = self.growth_tracker.get_stage().name
+        body["sleeping"] = self.sleep_engine.is_sleeping
 
         env = make_envelope(
             MessageType.HEARTBEAT,
@@ -557,6 +583,76 @@ class Citizen:
         """Override in subclass to handle emergency stop."""
         pass
 
+    # ── v4.0: Biological lifecycle hooks ──
+
+    def _on_task_completed(self, task_type: str, skill: str, success: bool,
+                           duration_ms: int = 0, telemetry: dict | None = None):
+        """Called after any task completes — feeds all biological subsystems."""
+        # Track counts
+        if success:
+            self._tasks_completed_count += 1
+        else:
+            self._tasks_failed_count += 1
+
+        # Soul: personality drift
+        if success:
+            self.soul.on_task_success(task_type)
+        else:
+            self.soul.on_task_failure(task_type)
+
+        # Memory: episodic record
+        self.memory.remember_episode(
+            what=f"{task_type}/{skill}",
+            outcome="success" if success else "failed",
+            importance=0.7 if not success else 0.5,  # Failures are more memorable
+            duration_ms=duration_ms,
+        )
+
+        # Performance tracking
+        self.performance.record(skill, success)
+
+        # Strategy selection feedback
+        strategy = "default"
+        reward = 1.0 if success else 0.0
+        self.strategy_selector.update(task_type, strategy, reward)
+
+        # Failure analysis
+        if not success and telemetry:
+            analysis = self.failure_analyzer.analyze(task_type, telemetry)
+            self.memory.learn_fact(
+                task_type, "last_failure_cause", analysis.hypothesis,
+                confidence=0.7, source="self_analysis",
+            )
+
+        # Growth tracking
+        self.growth_tracker.record_task(skill, task_type, success)
+
+        # Procedural memory
+        self.memory.store_procedure(skill, task_type, {}, success)
+
+    def _on_telemetry_received(self, telemetry: dict):
+        """Called when telemetry is read — feeds reflexes, metabolism, pain."""
+        # Reflex engine: check for immediate reactions
+        reflex_events = self.reflex_engine.evaluate(telemetry)
+        for event in reflex_events:
+            self._log(f"REFLEX: {event.rule_name} → {event.action}")
+            self._add_log("REFLEX", "self", f"{event.rule_name}: {event.action}")
+            # Generate pain event for overload/thermal reflexes
+            if event.action in ("disable_torque", "reduce_velocity_50pct"):
+                pain = PainEvent(
+                    source=event.rule_name,
+                    pain_type=event.rule_name.split("_")[0],
+                    intensity=0.5 if "reduce" in event.action else 0.8,
+                )
+                self.pain_memory.record_pain(pain)
+                self.soul.on_pain_event()
+
+        # Metabolism: update power state
+        voltage = telemetry.get("min_voltage", 12.0)
+        current = telemetry.get("total_current_ma", 0)
+        if voltage and current:
+            self.metabolism_tracker.update(voltage, current)
+
     def _run_self_test(self) -> tuple[bool, str]:
         """Run a self-test to verify citizen is functioning.
 
@@ -725,6 +821,15 @@ class Citizen:
         except Exception:
             pass
 
+        # v4.0: load memory
+        try:
+            self.memory.load(self.name)
+            stats = self.memory.stats()
+            if stats["episodes"] > 0:
+                self._log(f"memory loaded — {stats['episodes']} episodes, {stats['facts']} facts, {stats['procedures']} procedures")
+        except Exception:
+            pass
+
     def _save_persisted_state(self):
         """Save neighbor table, constitution, and v2.0 state to disk."""
         try:
@@ -765,6 +870,12 @@ class Citizen:
             contracts_data = self.contracts.to_list()
             if contracts_data:
                 save_contracts(self.name, contracts_data)
+        except Exception:
+            pass
+
+        # v4.0: save memory
+        try:
+            self.memory.save(self.name)
         except Exception:
             pass
 

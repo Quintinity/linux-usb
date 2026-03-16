@@ -156,6 +156,25 @@ class WebDashboard:
             for m in list(c.message_log)[-15:]
         ]
 
+        # v4.0: biological subsystem stats
+        v4_stats = {}
+        try:
+            v4_stats = {
+                "soul": c.soul.to_dict() if hasattr(c, 'soul') else {},
+                "memory": c.memory.stats() if hasattr(c, 'memory') else {},
+                "growth": c.growth_tracker.stats() if hasattr(c, 'growth_tracker') else {},
+                "sleep": c.sleep_engine.stats() if hasattr(c, 'sleep_engine') else {},
+                "metabolism": c.metabolism_tracker.state.to_dict() if hasattr(c, 'metabolism_tracker') else {},
+                "pain": {"zones": c.pain_memory.active_zones(), "events": c.pain_memory.total_pain_events()} if hasattr(c, 'pain_memory') else {},
+                "reflexes": c.reflex_engine.get_stats() if hasattr(c, 'reflex_engine') else {},
+                "performance": {
+                    skill: round(c.performance.success_rate(skill), 2)
+                    for skill in list(c.performance.records.keys())[:10]
+                } if hasattr(c, 'performance') else {},
+            }
+        except Exception:
+            pass
+
         return web.json_response({
             "governor": {
                 "name": c.name,
@@ -176,6 +195,7 @@ class WebDashboard:
             "emotional": emotional,
             "mood": mood,
             "messages": messages,
+            "biological": v4_stats,
         })
 
     async def _api_events(self, request: web.Request) -> web.StreamResponse:

@@ -572,10 +572,14 @@ class PiCitizen(Citizen):
                 "max_temperature": report.get("max_temperature"),
                 "total_current_ma": report.get("total_current_ma"),
                 "has_errors": report.get("has_errors"),
+                "max_load_pct": report.get("max_load_pct"),
             }
             immune_matches = self.immune_memory.match(telem_dict)
             for pattern in immune_matches:
                 self._log(f"immune pattern matched: {pattern.pattern_type} — {pattern.mitigation}")
+
+            # v4.0: Feed telemetry to biological subsystems
+            self._on_telemetry_received(telem_dict)
 
             return report
         except ImportError:
@@ -695,6 +699,8 @@ class PiCitizen(Citizen):
                 governor_addr,
             )
             self._log(f"task complete: [{task_id}] {duration_ms}ms +{xp_earned} XP for {skill_name}")
+            # v4.0: Feed biological subsystems
+            self._on_task_completed(task_type, skill_name, True, duration_ms)
         except Exception as e:
             self._log(f"task failed: [{task_id}] {e}")
             self.send_report(
@@ -708,6 +714,8 @@ class PiCitizen(Citizen):
                 },
                 governor_addr,
             )
+            # v4.0: Feed biological subsystems on failure
+            self._on_task_completed(task_type, task_type, False)
         finally:
             self._current_task_id = None
             self._current_task_type = None
