@@ -105,11 +105,11 @@ class VideoStream:
         if not self._cap.isOpened():
             return False
 
-        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-        self._writer = cv2.VideoWriter(
-            str(self.output_path), fourcc, self.fps,
-            self.resolution,
-        )
+        # Save frames as JPEG images — most reliable across all platforms
+        # VideoWriter codecs are unreliable on Pi (FFmpeg backend issues)
+        self._save_frames = True
+        self._writer = None
+        (self.output_path.parent / "frames").mkdir(exist_ok=True)
 
         self._running = True
         self._thread = threading.Thread(target=self._record_loop, daemon=True)
@@ -122,8 +122,13 @@ class VideoStream:
         while self._running:
             t0 = time.monotonic()
             ret, frame = self._cap.read()
-            if ret and self._writer:
-                self._writer.write(frame)
+            if ret:
+                if self._writer:
+                    self._writer.write(frame)
+                elif self._save_frames:
+                    frame_path = self.output_path.parent / "frames" / f"{self._frame_count:06d}.jpg"
+                    cv2.imwrite(str(frame_path), frame)
+
                 mono = time.monotonic()
                 self._frame_timestamps.append(mono)
                 self._frame_count += 1
