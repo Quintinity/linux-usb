@@ -43,6 +43,7 @@ class SurfaceCitizen(Citizen):
         self,
         leader_port: str = "/dev/ttyACM1",
         teleop_fps: float = 60.0,
+        auto_teleop: bool = False,
     ):
         super().__init__(
             name="surface-governor",
@@ -51,6 +52,7 @@ class SurfaceCitizen(Citizen):
         )
         self.leader_port = leader_port
         self.teleop_fps = teleop_fps
+        self._auto_teleop = auto_teleop
         self._follower_key: str | None = None
         self._follower_addr: tuple | None = None
         self._leader_bus = None
@@ -166,8 +168,9 @@ class SurfaceCitizen(Citizen):
         self._update_compositions()
         self._try_symbiosis()
 
-        # If it's a manipulator and we don't have a follower yet, propose teleop
-        if "6dof_arm" in neighbor.capabilities and not self._teleop_active:
+        # Only auto-propose teleop if explicitly enabled (default: off)
+        # In CLI/marketplace mode, arms should stay idle for task bidding
+        if self._auto_teleop and "6dof_arm" in neighbor.capabilities and not self._teleop_active:
             self._propose_teleop(neighbor)
 
     def _on_neighbor_presence_changed(self, neighbor: Neighbor, old_presence: Presence):

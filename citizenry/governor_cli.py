@@ -222,6 +222,28 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
                         print(f"  {GREEN}●{RESET} {prov} ←→ {cons} = {CYAN}{c.composite_capability}{RESET}")
                 else:
                     print(f"  {DIM}No active contracts{RESET}")
+            elif line.startswith("start teleop"):
+                # Find an idle arm to teleop with
+                parts = line.split()
+                target_name = parts[2] if len(parts) > 2 else None
+                arm = None
+                for n in surface.neighbors.values():
+                    if "6dof_arm" in n.capabilities:
+                        if target_name and n.name != target_name:
+                            continue
+                        arm = n
+                        break
+                if arm:
+                    surface._propose_teleop(arm)
+                    print(f"  {GREEN}Teleop proposed to {arm.name}{RESET}")
+                else:
+                    print(f"  {YELLOW}No idle arm found{RESET}")
+            elif line == "stop teleop":
+                if surface._teleop_active:
+                    await surface.stop_teleop()
+                    print(f"  {GREEN}Teleop stopped{RESET}")
+                else:
+                    print(f"  {DIM}Teleop not active{RESET}")
             elif line == "locations":
                 locs = surface.location_registry.to_list()
                 print(f"\n{BOLD}Locations ({len(locs)}):{RESET}")
