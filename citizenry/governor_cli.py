@@ -196,6 +196,18 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
                     print(f"  {DIM}No active contracts{RESET}")
             elif line == "dashboard":
                 print(f"  {GREEN}http://0.0.0.0:8080{RESET}")
+            elif line == "wills":
+                archive = surface.get_will_archive()
+                if archive:
+                    print(f"\n{BOLD}Will Archive ({len(archive)} entries):{RESET}")
+                    for w in archive[-10:]:
+                        name = w.get("citizen", "?")
+                        reason = w.get("reason", "?")
+                        task = w.get("current_task_type", "none")
+                        xp_count = len(w.get("xp", {}))
+                        print(f"  {DIM}{name}{RESET} — {reason} | task: {task} | {xp_count} XP entries")
+                else:
+                    print(f"  {DIM}No wills received yet{RESET}")
             elif line.startswith("start recording"):
                 task_label = line.replace("start recording", "").strip() or "teleoperation"
                 if collector.start_recording(task_label):
@@ -209,13 +221,30 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
                 else:
                     print(f"  {GREEN}Episode saved:{RESET} {result['frames']} frames, {result['duration_s']}s")
             elif line in ("calibrate camera", "calibrate", "run calibration"):
-                print(f"  {BOLD}Camera calibration:{RESET}")
-                print(f"  {DIM}This requires the arm and camera to be on the same Pi.{RESET}")
-                print(f"  {DIM}The arm will move to 10 positions while the camera detects the gripper.{RESET}")
-                print(f"  {DIM}(Interactive calibration coming soon — use NL command for now){RESET}")
-                action = aide.execute("calibrate camera")
-                if action:
-                    print(f"  {GREEN}→{RESET} {action.explanation}")
+                # Find a Pi citizen that has both arm and camera capabilities nearby
+                arm_citizen = None
+                for n in surface.neighbors.values():
+                    if "6dof_arm" in n.capabilities:
+                        arm_citizen = n
+                        break
+                if arm_citizen:
+                    print(f"  {BOLD}Sending calibration to {arm_citizen.name}...{RESET}")
+                    print(f"  {DIM}Arm will move to 10+ positions while camera detects gripper.{RESET}")
+                    print(f"  {DIM}This takes ~30 seconds. Do not touch the arm.{RESET}")
+                    surface.send_propose(
+                        arm_citizen.pubkey,
+                        {"task": "calibrate"},
+                        arm_citizen.addr,
+                    )
+                    # Wait for result
+                    print(f"  {DIM}Waiting for calibration result...{RESET}")
+                    await asyncio.sleep(35)
+                    # Check for calibration_complete in message log
+                    for entry in list(surface.message_log)[-10:]:
+                        if "calibration" in entry.detail.lower():
+                            print(f"  {GREEN}→{RESET} {entry.detail}")
+                else:
+                    print(f"  {YELLOW}No arm citizen found. Connect a Pi with arm first.{RESET}")
             elif line in ("check calibration",):
                 from .calibration import load_calibration
                 cal = load_calibration("calibration")

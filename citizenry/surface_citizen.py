@@ -252,6 +252,76 @@ class SurfaceCitizen(Citizen):
                         self.send_propose(pubkey, reauction.to_propose_body(), n.addr)
             return
 
+        # v3.0: Will absorption — re-auction tasks, preserve XP, break contracts
+        if report_type == "will":
+            citizen_name = body.get("citizen", "?")
+            citizen_pubkey = body.get("citizen_pubkey", env.sender)
+            self._log(f"WILL received from {citizen_name} — reason: {body.get('reason', '?')}")
+            self._add_log("WILL", citizen_name, f"final will — {body.get('reason', 'shutdown')}")
+
+            # Re-auction active task with partial results
+            task_id = body.get("current_task_id")
+            if task_id:
+                reauction = self.marketplace.fail_task(task_id, "citizen_died")
+                if reauction:
+                    reauction.params["partial_results"] = body.get("partial_results", {})
+                    for pubkey, n in self.neighbors.items():
+                        self.send_propose(pubkey, reauction.to_propose_body(), n.addr)
+                    self._log(f"will: task [{task_id}] re-auctioned with partial results")
+
+            # Preserve XP in fleet genome
+            will_xp = body.get("xp", {})
+            if will_xp:
+                citizen_type = body.get("citizen_type", "")
+                if citizen_type not in self._fleet_genomes:
+                    self._fleet_genomes[citizen_type] = CitizenGenome(citizen_type=citizen_type)
+                for skill, xp in will_xp.items():
+                    existing = self._fleet_genomes[citizen_type].xp.get(skill, 0)
+                    self._fleet_genomes[citizen_type].xp[skill] = existing + xp
+                self._log(f"will: {len(will_xp)} XP entries preserved in fleet genome")
+
+            # Break contracts involving this citizen
+            broken = self.contracts.remove_citizen(citizen_pubkey)
+            if broken:
+                self._log(f"will: {len(broken)} contracts broken")
+                for contract in broken:
+                    self._add_log("CONTRACT", citizen_name, f"broken: {contract.composite_capability}")
+                self._update_compositions()
+
+            # Archive the will
+            self._archive_will(body)
+            return
+
+        # v3.0: Calibration result from Pi
+        if report_type == "calibration_complete":
+            error = body.get("error")
+            if error:
+                self._log(f"calibration FAILED: {error}")
+                self._add_log("CALIBRATE", _sid(env), f"failed: {error}")
+            else:
+                pts = body.get("points", 0)
+                reproj = body.get("reprojection_error", 0)
+                val = body.get("validation_error", 0)
+                placement = body.get("placement", "?")
+                self._log(f"calibration complete: {pts} points, reproj={reproj:.1f}, val={val:.1f}, placement={placement}")
+                self._add_log("CALIBRATE", _sid(env), f"done: {pts}pts err={reproj:.1f}")
+                # Save calibration locally too (for visual_tasks to use)
+                cal_data = body.get("calibration")
+                if cal_data:
+                    try:
+                        from .calibration import CalibrationResult, save_calibration
+                        result = CalibrationResult.from_dict(cal_data)
+                        save_calibration("calibration", result)
+                        # Load into visual tasks
+                        from .visual_tasks import load_calibration_transform
+                        load_calibration_transform("calibration")
+                        self._log("calibration loaded into visual task pipeline")
+                    except Exception as e:
+                        self._log(f"calibration save failed: {e}")
+                for s in body.get("suggestions", []):
+                    self._log(f"  placement suggestion: {s}")
+            return
+
         if report_type == "telemetry":
             self.follower_telemetry[env.sender] = body
             violations = body.get("violations", [])
@@ -427,6 +497,42 @@ class SurfaceCitizen(Citizen):
                 )
                 self._log(f"symbiosis proposed: {cam.name} + {arm.name} → visual_pick_and_place")
                 self._add_log("CONTRACT", "governor", f"proposed: {cam.name} + {arm.name}")
+
+    # ── v3.0: Will archive ──
+
+    def _archive_will(self, will_body: dict):
+        """Persist received will to disk."""
+        try:
+            import json
+            from .persistence import CITIZENRY_DIR
+            CITIZENRY_DIR.mkdir(parents=True, exist_ok=True)
+            archive_path = CITIZENRY_DIR / "will_archive.json"
+            archive = []
+            if archive_path.exists():
+                try:
+                    archive = json.loads(archive_path.read_text())
+                except Exception:
+                    archive = []
+            archive.append(will_body)
+            # Keep last 100 wills
+            archive = archive[-100:]
+            tmp = archive_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(archive, indent=2) + "\n")
+            tmp.replace(archive_path)
+        except Exception as e:
+            self._log(f"will archive failed: {e}")
+
+    def get_will_archive(self) -> list[dict]:
+        """Load the will archive."""
+        try:
+            import json
+            from .persistence import CITIZENRY_DIR
+            path = CITIZENRY_DIR / "will_archive.json"
+            if path.exists():
+                return json.loads(path.read_text())
+        except Exception:
+            pass
+        return []
 
     # ── v2.0: Genome distribution ──
 

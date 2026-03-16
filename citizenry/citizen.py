@@ -53,6 +53,7 @@ class Neighbor:
     presence: Presence = Presence.ONLINE
     missed_heartbeats: int = 0
     has_constitution: bool = False
+    emotional_state: Any = None  # EmotionalState from heartbeat
 
 
 @dataclass
@@ -387,6 +388,10 @@ class Citizen:
             n.health = env.body.get("health", 1.0)
             n.state = env.body.get("state", "unknown")
             n.addr = (addr[0], env.body.get("unicast_port", addr[1]))
+            # v3.0: parse emotional state from heartbeat
+            emo_data = env.body.get("emotional_state")
+            if emo_data:
+                n.emotional_state = EmotionalState.from_dict(emo_data)
             # Reset presence on heartbeat
             if n.presence != Presence.ONLINE:
                 self._log(f"NEIGHBOR BACK: {n.name} [{short_id(sender)}] — was {n.presence.value}")

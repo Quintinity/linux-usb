@@ -167,6 +167,8 @@ class PiCitizen(Citizen):
             self._handle_teleop_frame(env, body)
         elif task == "symbiosis_propose":
             self._handle_symbiosis_propose(env, addr, body)
+        elif task == "calibrate":
+            self._handle_calibrate(env, addr, body)
         elif body.get("task_id"):
             # v2.0: Marketplace task proposal — evaluate and bid
             self._handle_marketplace_propose(env, addr, body)
@@ -328,6 +330,195 @@ class PiCitizen(Citizen):
         self.messages_sent += 1
         self._log(f"symbiosis accepted: {contract.composite_capability} with [{env.sender[:8]}]")
         self._add_log("CONTRACT", self.name, f"accepted: {contract.composite_capability}")
+
+    def _handle_calibrate(self, env, addr, body):
+        """Run camera-arm calibration locally on the Pi."""
+        self.send_accept(env.sender, body, addr)
+        self._log("calibration starting — arm will move to 10+ positions")
+        asyncio.get_event_loop().create_task(
+            self._run_calibration(env.sender, addr)
+        )
+
+    async def _run_calibration(self, governor_key: str, governor_addr: tuple):
+        """Execute the full calibration procedure locally."""
+        try:
+            import cv2
+            from .calibration import (
+                CALIBRATION_POSES, CORNER_POSES, VALIDATION_POSES,
+                GripperDetector, CameraPlacementGuide, fit_homography,
+                compute_validation_error, CalibrationResult, CalibrationPoint,
+                save_calibration, _full_pose,
+            )
+
+            cap = cv2.VideoCapture(0)
+            if not cap.isOpened():
+                self._report_calibration_error(governor_key, governor_addr, "camera not available")
+                return
+
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+            if not self._follower_bus:
+                self._follower_bus = self._init_follower_bus()
+            if not self._follower_bus:
+                cap.release()
+                self._report_calibration_error(governor_key, governor_addr, "arm not available")
+                return
+
+            self._enable_torque()
+            detector = GripperDetector()
+            collected_points = []
+            pixel_pts = []
+            servo_pts = []
+
+            # Phase 1: Placement check via corners
+            self._log("calibration phase 1: checking camera placement")
+            corner_pixels = []
+            for i, pose in enumerate(CORNER_POSES):
+                full = _full_pose(pose)
+                full["gripper"] = GripperDetector.GRIPPER_OPEN
+                await self._smooth_move(full, duration=0.8)
+                await asyncio.sleep(0.5)
+                ret, frame_open = cap.read()
+                full["gripper"] = GripperDetector.GRIPPER_CLOSED
+                self._write_positions(full)
+                await asyncio.sleep(0.5)
+                ret2, frame_closed = cap.read()
+
+                tip = detector.detect(frame_open, frame_closed)
+                corner_pixels.append(tip)
+                self._log(f"  corner {i+1}/4: {'detected' if tip else 'not visible'}")
+
+            placement = CameraPlacementGuide.evaluate(corner_pixels)
+            self._log(f"  placement: {placement.overall} ({placement.corners_visible}/4 corners, {placement.coverage_pct:.0f}% coverage)")
+            for s in placement.suggestions:
+                self._log(f"  suggestion: {s}")
+
+            # Phase 2: Collect calibration points
+            self._log("calibration phase 2: collecting 10 calibration points")
+            for i, pose in enumerate(CALIBRATION_POSES):
+                full = _full_pose(pose)
+                full["gripper"] = GripperDetector.GRIPPER_OPEN
+                await self._smooth_move(full, duration=0.6)
+                await asyncio.sleep(0.5)
+                ret, frame_open = cap.read()
+
+                full["gripper"] = GripperDetector.GRIPPER_CLOSED
+                self._write_positions(full)
+                await asyncio.sleep(0.5)
+                ret2, frame_closed = cap.read()
+
+                tip = detector.detect(frame_open, frame_closed)
+                if tip is None:
+                    tip = detector.detect_by_color(frame_open)
+
+                if tip:
+                    px, py = tip
+                    pan = pose["shoulder_pan"]
+                    lift = pose["shoulder_lift"]
+                    elbow = pose["elbow_flex"]
+                    pixel_pts.append((px, py))
+                    servo_pts.append((pan, lift, elbow))
+                    collected_points.append(CalibrationPoint(px, py, pan, lift, elbow))
+                    self._log(f"  point {i+1}/10: ({px:.0f}, {py:.0f}) → pan={pan} lift={lift} elbow={elbow}")
+                else:
+                    self._log(f"  point {i+1}/10: detection failed — skipping")
+
+            # Move home
+            await self._smooth_move(_full_pose({"shoulder_pan": 2048, "shoulder_lift": 1400, "elbow_flex": 3000}), duration=0.8)
+            self._disable_torque()
+
+            if len(pixel_pts) < 4:
+                cap.release()
+                self._report_calibration_error(governor_key, governor_addr,
+                    f"only {len(pixel_pts)} points detected, need at least 4")
+                return
+
+            # Phase 3: Fit homography
+            self._log("calibration phase 3: fitting homography")
+            transform, inliers, outliers, reproj_error = fit_homography(pixel_pts, servo_pts)
+
+            if transform is None:
+                cap.release()
+                self._report_calibration_error(governor_key, governor_addr, "homography fit failed")
+                return
+
+            self._log(f"  homography: {inliers} inliers, {outliers} outliers, error={reproj_error:.1f}")
+
+            # Phase 4: Validation
+            self._log("calibration phase 4: validation on held-out poses")
+            val_pixel = []
+            val_servo = []
+            self._enable_torque()
+            for i, pose in enumerate(VALIDATION_POSES):
+                full = _full_pose(pose)
+                full["gripper"] = GripperDetector.GRIPPER_OPEN
+                await self._smooth_move(full, duration=0.6)
+                await asyncio.sleep(0.5)
+                ret, frame_open = cap.read()
+                full["gripper"] = GripperDetector.GRIPPER_CLOSED
+                self._write_positions(full)
+                await asyncio.sleep(0.5)
+                ret2, frame_closed = cap.read()
+
+                tip = detector.detect(frame_open, frame_closed)
+                if tip:
+                    val_pixel.append(tip)
+                    val_servo.append((pose["shoulder_pan"], pose["shoulder_lift"], pose["elbow_flex"]))
+                    self._log(f"  validation {i+1}/3: detected")
+                else:
+                    self._log(f"  validation {i+1}/3: detection failed")
+
+            await self._smooth_move(_full_pose({"shoulder_pan": 2048, "shoulder_lift": 1400, "elbow_flex": 3000}), duration=0.8)
+            self._disable_torque()
+            cap.release()
+
+            val_error = compute_validation_error(val_pixel, val_servo, transform) if val_pixel else float('inf')
+            self._log(f"  validation error: {val_error:.1f}")
+
+            # Phase 5: Save
+            result = CalibrationResult(
+                points=collected_points,
+                homography=transform,
+                inlier_count=inliers,
+                outlier_count=outliers,
+                reprojection_error=reproj_error,
+                validation_error=val_error,
+                placement=placement,
+            )
+            save_calibration("calibration", result)
+            self._log(f"calibration saved — {len(collected_points)} points, error={reproj_error:.1f}")
+
+            # Report to governor
+            self.send_report(
+                governor_key,
+                {
+                    "type": "calibration_complete",
+                    "citizen": self.name,
+                    "points": len(collected_points),
+                    "inliers": inliers,
+                    "outliers": outliers,
+                    "reprojection_error": reproj_error,
+                    "validation_error": val_error,
+                    "placement": placement.overall,
+                    "suggestions": placement.suggestions,
+                    "calibration": result.to_dict(),
+                },
+                governor_addr,
+            )
+
+        except Exception as e:
+            self._log(f"calibration error: {e}")
+            self._report_calibration_error(governor_key, governor_addr, str(e))
+        finally:
+            self._disable_torque()
+
+    def _report_calibration_error(self, governor_key: str, governor_addr: tuple, error: str):
+        self.send_report(
+            governor_key,
+            {"type": "calibration_complete", "citizen": self.name, "error": error},
+            governor_addr,
+        )
 
     async def _telemetry_loop(self):
         """Stream servo telemetry back to governor at telemetry_hz."""

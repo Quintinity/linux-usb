@@ -86,6 +86,8 @@ class WebDashboard:
                 "last_seen_ago": round(now - n.last_seen, 1) if n.last_seen > 0 else None,
                 "presence": n.presence.value,
                 "has_constitution": n.has_constitution,
+                "mood": n.emotional_state.mood if hasattr(n, 'emotional_state') and n.emotional_state else None,
+                "emotional": n.emotional_state.to_dict() if hasattr(n, 'emotional_state') and n.emotional_state else None,
             }
 
         tasks = []

@@ -290,9 +290,15 @@ class Dashboard:
                         f"  {DIM}caps: {caps}{RESET}", w
                     ))
 
-                # v2.0: Fourth line: skills (if neighbor has matching citizen data)
-                # We show the skill tree from the citizen itself if it's the governor's own view
-                # For neighbors, we don't have their skill data directly — only from reports
+                # v3.0: Mood label from emotional state
+                if hasattr(n, 'emotional_state') and n.emotional_state is not None:
+                    mood = n.emotional_state.mood
+                    mood_colors = {"focused": GREEN, "tired": YELLOW, "exhausted": RED,
+                                   "uncertain": YELLOW, "curious": CYAN, "energized": GREEN}
+                    mc = mood_colors.get(mood, DIM)
+                    lines.append(self._box_line(
+                        f"  {mc}mood: {mood}{RESET}", w
+                    ))
 
         lines.append(self._blank_line(w))
 
