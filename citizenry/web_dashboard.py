@@ -40,6 +40,7 @@ class WebDashboard:
         self._app.router.add_get("/", self._index)
         self._app.router.add_get("/api/status", self._api_status)
         self._app.router.add_get("/api/events", self._api_events)
+        self._app.router.add_post("/api/calibrate", self._api_calibrate)
 
         self._runner = web.AppRunner(self._app)
         await self._runner.setup()
@@ -197,6 +198,24 @@ class WebDashboard:
             "messages": messages,
             "biological": v4_stats,
         })
+
+    async def _api_calibrate(self, request: web.Request) -> web.Response:
+        """Trigger calibration on an arm citizen via POST."""
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        mode = data.get("mode", "staged")
+        c = self.citizen
+
+        # Find an arm citizen
+        arm = next((n for n in c.neighbors.values() if "6dof_arm" in n.capabilities), None)
+        if not arm:
+            return web.json_response({"error": "no arm citizen found"}, status=404)
+
+        c.send_propose(arm.pubkey, {"task": "self_calibrate", "mode": mode}, arm.addr)
+        self.add_event("calibration_started", {"arm": arm.name, "mode": mode})
+        return web.json_response({"status": "started", "arm": arm.name, "mode": mode})
 
     async def _api_events(self, request: web.Request) -> web.StreamResponse:
         response = web.StreamResponse()

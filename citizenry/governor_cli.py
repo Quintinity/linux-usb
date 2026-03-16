@@ -328,15 +328,34 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
                     print(f"  {YELLOW}{result['error']}{RESET}")
                 else:
                     print(f"  {GREEN}Episode saved:{RESET} {result['frames']} frames, {result['duration_s']}s")
-            elif line in ("self calibrate", "self-calibrate", "find limits"):
+            elif line.startswith("self calibrate") or line.startswith("self-calibrate") or line == "find limits":
                 arm = next((n for n in surface.neighbors.values() if "6dof_arm" in n.capabilities), None)
                 if arm:
-                    print(f"  {BOLD}Self-calibrating {arm.name}...{RESET}")
-                    print(f"  {DIM}Each motor will move to find physical limits by stall detection.{RESET}")
-                    print(f"  {DIM}This takes ~2 minutes. Do not touch the arm.{RESET}")
-                    surface.send_propose(arm.pubkey, {"task": "self_calibrate"}, arm.addr)
+                    # Parse mode from command: "self calibrate staged" / "self calibrate camera" etc
+                    parts = line.split()
+                    mode = "staged"  # Default
+                    if len(parts) >= 3 and parts[-1] in ("staged", "camera", "current", "manual"):
+                        mode = parts[-1]
+                    else:
+                        print(f"  {BOLD}Calibration modes:{RESET}")
+                        print(f"    {BOLD}staged{RESET}  — Auto lift + fold + calibrate (recommended)")
+                        print(f"    {BOLD}camera{RESET}  — Camera verifies arm position")
+                        print(f"    {BOLD}current{RESET} — Current sensing for liftoff")
+                        print(f"    {BOLD}manual{RESET}  — You lift arm first, then auto-calibrate")
+                        mode_input = await asyncio.get_event_loop().run_in_executor(
+                            None, lambda: input(f"  Select mode [{BOLD}staged{RESET}]: ").strip()
+                        )
+                        if mode_input in ("staged", "camera", "current", "manual"):
+                            mode = mode_input
+
+                    print(f"  {BOLD}Self-calibrating {arm.name} (mode: {mode})...{RESET}")
+                    if mode == "manual":
+                        print(f"  {YELLOW}Lift the arm to an upright L-shape NOW. You have 10 seconds.{RESET}")
+                    else:
+                        print(f"  {DIM}Do not touch the arm.{RESET}")
+                    surface.send_propose(arm.pubkey, {"task": "self_calibrate", "mode": mode}, arm.addr)
                     print(f"  {DIM}Waiting for results...{RESET}")
-                    await asyncio.sleep(120)
+                    await asyncio.sleep(90 if mode != "manual" else 100)
                     for entry in list(surface.message_log)[-15:]:
                         if "self-cal" in entry.detail.lower() or "calibrat" in entry.detail.lower():
                             print(f"  {GREEN}→{RESET} {entry.detail}")

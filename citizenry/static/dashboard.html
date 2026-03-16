@@ -95,6 +95,26 @@ td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
   </div>
 
   <div class="card full">
+    <h2>Calibration</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <button onclick="calibrate('staged')" style="padding:6px 12px;background:#238636;color:white;border:none;border-radius:4px;cursor:pointer;font-family:inherit">
+        Staged (Recommended)</button>
+      <button onclick="calibrate('camera')" style="padding:6px 12px;background:#1f6feb;color:white;border:none;border-radius:4px;cursor:pointer;font-family:inherit">
+        Camera-Guided</button>
+      <button onclick="calibrate('current')" style="padding:6px 12px;background:#9e6a03;color:white;border:none;border-radius:4px;cursor:pointer;font-family:inherit">
+        Current-Sensing</button>
+      <button onclick="calibrate('manual')" style="padding:6px 12px;background:var(--border);color:var(--text);border:none;border-radius:4px;cursor:pointer;font-family:inherit">
+        Manual</button>
+    </div>
+    <div id="cal-status" style="color:var(--dim);font-size:12px"></div>
+  </div>
+
+  <div class="card full">
+    <h2>Biological Systems (v4.0)</h2>
+    <div id="biological" style="font-size:12px"></div>
+  </div>
+
+  <div class="card full">
     <h2>Messages</h2>
     <div id="messages"></div>
   </div>
@@ -217,6 +237,47 @@ async function refresh() {
   } catch(e) {
     $('error').textContent = 'Connection error: ' + e.message;
     $('error').style.display = 'block';
+  }
+}
+
+// Biological systems
+    const bio = d.biological || {};
+    let bioHtml = '';
+    if (bio.soul) bioHtml += `<span class="stat"><span class="val">${bio.soul.life_events_count||0}</span><br><span class="label">Life Events</span></span>`;
+    if (bio.memory) bioHtml += `<span class="stat"><span class="val">${bio.memory.episodes||0}</span><br><span class="label">Memories</span></span>`;
+    if (bio.growth) bioHtml += `<span class="stat"><span class="val">${bio.growth.stage||'?'}</span><br><span class="label">Growth</span></span>`;
+    if (bio.sleep) bioHtml += `<span class="stat"><span class="val">${bio.sleep.sleeping?'Sleeping':'Awake'}</span><br><span class="label">Sleep</span></span>`;
+    if (bio.metabolism) bioHtml += `<span class="stat"><span class="val">${bio.metabolism.level||'?'}</span><br><span class="label">Metabolism</span></span>`;
+    if (bio.pain) bioHtml += `<span class="stat"><span class="val">${bio.pain.zones||0}</span><br><span class="label">Pain Zones</span></span>`;
+    if (bio.reflexes) bioHtml += `<span class="stat"><span class="val">${bio.reflexes.total_fires||0}</span><br><span class="label">Reflex Fires</span></span>`;
+    if (bio.performance) {
+      const skills = Object.entries(bio.performance);
+      if (skills.length) bioHtml += '<br>' + skills.map(([s,r]) => `${s}: ${Math.round(r*100)}%`).join(' | ');
+    }
+    $('biological').innerHTML = bioHtml || '<span style="color:var(--dim)">No v4.0 data</span>';
+
+  } catch(e) {
+    $('error').textContent = 'Connection error: ' + e.message;
+    $('error').style.display = 'block';
+  }
+}
+
+async function calibrate(mode) {
+  $('cal-status').textContent = `Starting ${mode} calibration...`;
+  try {
+    const r = await fetch('/api/calibrate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode})
+    });
+    const d = await r.json();
+    if (d.error) {
+      $('cal-status').textContent = `Error: ${d.error}`;
+    } else {
+      $('cal-status').textContent = `Calibration started on ${d.arm} (mode: ${d.mode}). This takes 1-2 minutes...`;
+    }
+  } catch(e) {
+    $('cal-status').textContent = `Failed: ${e.message}`;
   }
 }
 

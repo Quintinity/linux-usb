@@ -354,18 +354,27 @@ class PiCitizen(Citizen):
         )
 
     def _handle_self_calibrate(self, env, addr, body):
-        """Run self-calibration: discover physical joint limits by stall detection."""
+        """Run self-calibration with mode selection."""
+        mode_str = body.get("mode", "staged")
         self.send_accept(env.sender, body, addr)
-        self._log("self-calibration starting — arm will move each motor to find limits")
+        self._log(f"self-calibration starting — mode: {mode_str}")
         import asyncio
         asyncio.get_event_loop().create_task(
-            self._run_self_calibration(env.sender, addr)
+            self._run_self_calibration(env.sender, addr, mode_str)
         )
 
-    async def _run_self_calibration(self, governor_key: str, governor_addr: tuple):
+    async def _run_self_calibration(self, governor_key: str, governor_addr: tuple, mode_str: str = "staged"):
         """Execute self-calibration and report results."""
         try:
-            from .self_calibration import self_calibrate_all
+            from .self_calibration import self_calibrate_all, CalibrationMode
+
+            mode_map = {
+                "staged": CalibrationMode.GRAVITY_STAGED,
+                "current": CalibrationMode.CURRENT_SENSING,
+                "camera": CalibrationMode.CAMERA_GUIDED,
+                "manual": CalibrationMode.MANUAL,
+            }
+            mode = mode_map.get(mode_str, CalibrationMode.GRAVITY_STAGED)
 
             if not self._follower_bus:
                 self._follower_bus = self._init_follower_bus()
@@ -377,6 +386,7 @@ class PiCitizen(Citizen):
 
             result = self_calibrate_all(
                 self._follower_bus,
+                mode=mode,
                 log_fn=lambda msg: self._log(f"cal: {msg}"),
             )
 
