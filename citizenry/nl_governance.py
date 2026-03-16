@@ -73,6 +73,20 @@ _TASK_PATTERNS = [
     (r"pick(?:\s+(?:up|and\s+place))?", "task_create", {"type": "pick_and_place", "params": {}}),
 ]
 
+# Recording patterns
+_RECORDING_PATTERNS = [
+    (r"start\s+record(?:ing)?", "start_recording", {}),
+    (r"stop\s+record(?:ing)?", "stop_recording", {}),
+    (r"save\s+episode", "stop_recording", {}),
+    (r"record(?:\s+(?:a\s+)?(?:episode|demo))?", "start_recording", {}),
+]
+
+# Calibration patterns
+_CALIBRATION_PATTERNS = [
+    (r"calibrate(?:\s+camera)?", "calibrate", {}),
+    (r"run\s+calibration", "calibrate", {}),
+]
+
 # Law patterns
 _LAW_PATTERNS = [
     (r"(?:set\s+)?(?:teleop\s+)?fps\s+(?:to\s+)?(\d+)", "law_update", lambda m: {"law_id": "teleop_max_fps", "params": {"fps": int(m.group(1))}}),
@@ -190,7 +204,69 @@ def parse_command(text: str) -> GovernanceAction | None:
                 explanation=f"Create task: {task_info['type']}",
             )
 
+    # Recording commands
+    for pattern, action, _ in _RECORDING_PATTERNS:
+        if re.search(pattern, text):
+            return GovernanceAction(
+                action_type=action,
+                confidence=0.9,
+                explanation=f"{'Start' if 'start' in action else 'Stop'} recording",
+            )
+
+    # Calibration commands
+    for pattern, action, _ in _CALIBRATION_PATTERNS:
+        if re.search(pattern, text):
+            return GovernanceAction(
+                action_type="calibrate",
+                confidence=0.9,
+                explanation="Run camera-to-arm calibration",
+            )
+
+    # Try local LLM as fallback (if available)
+    llm_result = _try_llm_parse(text)
+    if llm_result:
+        return llm_result
+
     return None
+
+
+def _try_llm_parse(text: str) -> GovernanceAction | None:
+    """Try to parse command via local LLM (ollama) as fallback."""
+    import json as _json
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["ollama", "run", "phi3", "--nowordwrap"],
+            input=f"""You are a robot governance system. Parse this command into an action.
+Valid actions: emergency_stop, law_update, task_create
+Valid tasks: basic_gesture, pick_and_place, color_detection, color_sorting, frame_capture
+Reply with ONLY a JSON object like: {{"action": "task_create", "task": "basic_gesture", "params": {{"gesture": "wave"}}}}
+If you cannot parse the command, reply: {{"action": "unknown"}}
+
+Command: "{text}"
+""",
+            capture_output=True, text=True, timeout=10,
+        )
+        data = _json.loads(result.stdout.strip().split('\n')[-1])
+        if data.get("action") == "unknown":
+            return None
+        if data.get("action") == "task_create":
+            return GovernanceAction(
+                action_type="task_create",
+                params={"type": data.get("task", ""), "params": data.get("params", {}),
+                        "required_capabilities": _caps_for_task(data.get("task", "")),
+                        "required_skills": _skills_for_task(data.get("task", ""))},
+                confidence=0.6,
+                explanation=f"LLM: {data.get('task', '?')}",
+            )
+        return GovernanceAction(
+            action_type=data.get("action", "unknown"),
+            params=data.get("params", {}),
+            confidence=0.6,
+            explanation=f"LLM: {data.get('action', '?')}",
+        )
+    except Exception:
+        return None  # ollama not available or parse failed
 
 
 def _caps_for_task(task_type: str) -> list[str]:
@@ -248,6 +324,12 @@ class GovernorAide:
             self._do_law_update(action.params)
         elif action.action_type == "task_create":
             self._do_task_create(action.params)
+        elif action.action_type == "start_recording":
+            self._do_start_recording()
+        elif action.action_type == "stop_recording":
+            self._do_stop_recording()
+        elif action.action_type == "calibrate":
+            self._do_calibrate()
 
         return action
 
@@ -294,3 +376,19 @@ class GovernorAide:
             required_capabilities=params.get("required_capabilities", []),
             required_skills=params.get("required_skills", []),
         )
+
+    def _do_start_recording(self):
+        """Start data collection."""
+        if hasattr(self.governor, '_data_collector'):
+            self.governor._data_collector.start_recording()
+
+    def _do_stop_recording(self):
+        """Stop data collection and save episode."""
+        if hasattr(self.governor, '_data_collector'):
+            result = self.governor._data_collector.stop_recording()
+            if "error" not in result:
+                print(f"  Episode saved: {result['frames']} frames, {result['duration_s']}s")
+
+    def _do_calibrate(self):
+        """Run camera-to-arm calibration."""
+        print("  Calibration requires interactive mode — use governor CLI")

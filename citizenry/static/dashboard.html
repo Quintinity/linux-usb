@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>armOS Citizenry Dashboard</title>
+<style>
+:root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #c9d1d9;
+  --green: #3fb950; --yellow: #d29922; --red: #f85149; --blue: #58a6ff; --dim: #8b949e; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'SF Mono', 'Fira Code', monospace; background: var(--bg); color: var(--text); padding: 16px; }
+h1 { color: var(--blue); font-size: 18px; margin-bottom: 4px; }
+h2 { color: var(--text); font-size: 14px; margin: 12px 0 6px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.subtitle { color: var(--dim); font-size: 12px; margin-bottom: 16px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
+.card.full { grid-column: 1 / -1; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { text-align: left; color: var(--dim); padding: 4px 8px; border-bottom: 1px solid var(--border); }
+td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 11px; }
+.tag.green { background: #238636; color: white; }
+.tag.yellow { background: #9e6a03; color: white; }
+.tag.red { background: #da3633; color: white; }
+.tag.blue { background: #1f6feb; color: white; }
+.tag.dim { background: var(--border); color: var(--dim); }
+.stat { display: inline-block; margin-right: 16px; }
+.stat .val { font-weight: bold; font-size: 18px; }
+.stat .label { color: var(--dim); font-size: 11px; }
+.mood { font-size: 14px; font-weight: bold; }
+.mood.focused { color: var(--green); }
+.mood.tired, .mood.exhausted { color: var(--yellow); }
+.mood.uncertain { color: var(--red); }
+.mood.curious { color: var(--blue); }
+.mood.energized { color: var(--green); }
+.mood.steady { color: var(--dim); }
+.bar { display: inline-block; height: 8px; border-radius: 4px; }
+.bar.green { background: var(--green); }
+.bar.yellow { background: var(--yellow); }
+.bar.red { background: var(--red); }
+.msg { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg .type { color: var(--blue); font-weight: bold; }
+#error { color: var(--red); font-size: 12px; display: none; }
+</style>
+</head>
+<body>
+<h1>armOS Citizenry Dashboard</h1>
+<div class="subtitle" id="status-line">Connecting...</div>
+<div id="error"></div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Citizens</h2>
+    <table><thead><tr><th>Name</th><th>Type</th><th>State</th><th>Health</th><th>Last Seen</th></tr></thead>
+    <tbody id="citizens"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h2>Emotional State</h2>
+    <div id="emotional">
+      <div class="mood steady" id="mood">--</div>
+      <div style="margin-top:8px">
+        <div>Fatigue: <span class="bar green" id="fatigue-bar" style="width:0px"></span> <span id="fatigue-val">0%</span></div>
+        <div>Confidence: <span class="bar green" id="conf-bar" style="width:0px"></span> <span id="conf-val">50%</span></div>
+        <div>Curiosity: <span class="bar blue" id="cur-bar" style="width:0px"></span> <span id="cur-val">0%</span></div>
+      </div>
+    </div>
+    <h2>Stats</h2>
+    <div id="stats"></div>
+  </div>
+
+  <div class="card">
+    <h2>Tasks</h2>
+    <table><thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Assigned</th></tr></thead>
+    <tbody id="tasks"></tbody></table>
+    <h2>Completed</h2>
+    <table><thead><tr><th>Type</th><th>Citizen</th><th>Duration</th><th>XP</th></tr></thead>
+    <tbody id="completed"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h2>Contracts</h2>
+    <div id="contracts"></div>
+    <h2>Composites</h2>
+    <div id="composites"></div>
+    <h2>Warnings</h2>
+    <div id="warnings"></div>
+    <h2>Immune Memory</h2>
+    <div id="immune"></div>
+  </div>
+
+  <div class="card full">
+    <h2>Telemetry</h2>
+    <div id="telemetry"></div>
+  </div>
+
+  <div class="card full">
+    <h2>Messages</h2>
+    <div id="messages"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function tag(text, cls) { return `<span class="tag ${cls}">${text}</span>`; }
+
+function statusTag(s) {
+  const m = {bidding:'yellow',assigned:'blue',executing:'green',completed:'green',failed:'red',pending:'dim'};
+  return tag(s, m[s]||'dim');
+}
+
+function presenceColor(p) {
+  return p === 'online' ? 'green' : p === 'degraded' ? 'yellow' : 'red';
+}
+
+function barWidth(v) { return Math.round(v * 100); }
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    $('error').style.display = 'none';
+
+    // Status line
+    const nc = Object.keys(d.neighbors).length;
+    $('status-line').textContent = `Governor: ${d.governor.name} [${d.governor.id}] | ${nc+1} citizens | uptime ${d.governor.uptime}s | ${d.governor.messages_sent} sent / ${d.governor.messages_received} rx`;
+
+    // Citizens
+    let rows = '';
+    for (const [id, n] of Object.entries(d.neighbors)) {
+      const hpct = Math.round(n.health*100);
+      const hcls = hpct > 70 ? 'green' : hpct > 40 ? 'yellow' : 'red';
+      const age = n.last_seen_ago !== null ? n.last_seen_ago + 's' : '--';
+      rows += `<tr><td><b>${n.name}</b><br><span style="color:var(--dim);font-size:11px">${n.capabilities.join(', ')}</span></td>
+        <td>${n.type}</td><td>${tag(n.state, presenceColor(n.presence))}</td>
+        <td>${tag(hpct+'%', hcls)}</td><td>${age}</td></tr>`;
+    }
+    $('citizens').innerHTML = rows || '<tr><td colspan=5 style="color:var(--dim)">No citizens discovered</td></tr>';
+
+    // Emotional
+    const e = d.emotional || {};
+    $('mood').textContent = d.mood || '--';
+    $('mood').className = 'mood ' + (d.mood || 'steady');
+    $('fatigue-bar').style.width = barWidth(e.fatigue||0) + 'px';
+    $('fatigue-bar').className = 'bar ' + ((e.fatigue||0) > 0.5 ? 'yellow' : 'green');
+    $('fatigue-val').textContent = Math.round((e.fatigue||0)*100) + '%';
+    $('conf-bar').style.width = barWidth(e.confidence||0.5) + 'px';
+    $('conf-bar').className = 'bar ' + ((e.confidence||0) > 0.5 ? 'green' : 'yellow');
+    $('conf-val').textContent = Math.round((e.confidence||0.5)*100) + '%';
+    $('cur-bar').style.width = barWidth(e.curiosity||0) + 'px';
+    $('cur-val').textContent = Math.round((e.curiosity||0)*100) + '%';
+
+    // Stats
+    $('stats').innerHTML = `
+      <span class="stat"><span class="val">${nc+1}</span><br><span class="label">Citizens</span></span>
+      <span class="stat"><span class="val">${d.tasks_completed.length}</span><br><span class="label">Tasks Done</span></span>
+      <span class="stat"><span class="val">${d.contracts.length}</span><br><span class="label">Contracts</span></span>
+      <span class="stat"><span class="val">${d.immune_count}</span><br><span class="label">Immune</span></span>
+      <span class="stat"><span class="val">${d.warnings.length}</span><br><span class="label">Warnings</span></span>`;
+
+    // Tasks
+    rows = '';
+    for (const t of d.tasks_active) {
+      rows += `<tr><td>${t.id}</td><td>${t.type}</td><td>${statusTag(t.status)}</td><td>${t.assigned_to||'--'}</td></tr>`;
+    }
+    $('tasks').innerHTML = rows || '<tr><td colspan=4 style="color:var(--dim)">No active tasks</td></tr>';
+
+    rows = '';
+    for (const t of d.tasks_completed.slice(-5).reverse()) {
+      rows += `<tr><td>${t.type}</td><td>${t.assigned_to||'?'}</td><td>${t.duration_ms}ms</td><td>+${t.xp_earned}</td></tr>`;
+    }
+    $('completed').innerHTML = rows || '<tr><td colspan=4 style="color:var(--dim)">None yet</td></tr>';
+
+    // Contracts
+    if (d.contracts.length) {
+      $('contracts').innerHTML = d.contracts.map(c =>
+        `<div>${c.provider} <-> ${c.consumer}: ${tag(c.composite,'blue')} ${tag(c.healthy?'healthy':'broken', c.healthy?'green':'red')}</div>`
+      ).join('');
+    } else { $('contracts').innerHTML = '<span style="color:var(--dim)">None</span>'; }
+
+    // Composites
+    $('composites').innerHTML = d.composites.length
+      ? d.composites.map(c => tag(c, 'blue')).join(' ')
+      : '<span style="color:var(--dim)">None discovered</span>';
+
+    // Warnings
+    if (d.warnings.length) {
+      $('warnings').innerHTML = d.warnings.map(w =>
+        `<div>${tag(w.severity, w.severity==='CRITICAL'||w.severity==='EMERGENCY'?'red':'yellow')} ${w.detail} (${w.age}s ago)</div>`
+      ).join('');
+    } else { $('warnings').innerHTML = '<span style="color:var(--dim)">None</span>'; }
+
+    // Immune
+    $('immune').textContent = d.immune_count + ' fault patterns';
+
+    // Telemetry
+    let telHtml = '';
+    for (const [name, t] of Object.entries(d.telemetry)) {
+      const motors = t.motors || {};
+      telHtml += `<b>${name}</b><table><thead><tr><th>Motor</th><th>V</th><th>mA</th><th>Load</th><th>Temp</th><th>Status</th></tr></thead><tbody>`;
+      for (const [m, v] of Object.entries(motors)) {
+        const tc = (v.temperature_c||0) > 50 ? 'color:var(--yellow)' : '';
+        const st = v.status === 0 ? tag('OK','green') : v.status > 0 ? tag('ERR','red') : '--';
+        telHtml += `<tr><td>${m}</td><td>${v.voltage?v.voltage.toFixed(1):'--'}V</td><td>${v.current_ma?Math.abs(v.current_ma).toFixed(0):'--'}</td>
+          <td>${v.load_pct?Math.abs(v.load_pct).toFixed(0):'--'}%</td><td style="${tc}">${v.temperature_c?v.temperature_c.toFixed(0):'--'}C</td><td>${st}</td></tr>`;
+      }
+      telHtml += '</tbody></table>';
+    }
+    $('telemetry').innerHTML = telHtml || '<span style="color:var(--dim)">Awaiting telemetry...</span>';
+
+    // Messages
+    $('messages').innerHTML = d.messages.slice(-10).reverse().map(m =>
+      `<div class="msg"><b>${m.time}</b> <span class="type">${m.type}</span> ${m.sender} — ${m.detail}</div>`
+    ).join('');
+
+  } catch(e) {
+    $('error').textContent = 'Connection error: ' + e.message;
+    $('error').style.display = 'block';
+  }
+}
+
+setInterval(refresh, 500);
+refresh();
+</script>
+</body>
+</html>
