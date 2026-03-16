@@ -28,6 +28,8 @@ from .immune import ImmuneMemory, bootstrap_immune_memory, FaultPattern
 from .mycelium import MyceliumNetwork, Warning, Severity
 from .genome import CitizenGenome, save_genome, load_genome
 from .symbiosis import ContractManager, SymbiosisContract, ContractStatus
+from .emotional import EmotionalState, compute_emotional_state
+from .will import CitizenWill, create_will
 
 
 class Presence(Enum):
@@ -116,6 +118,9 @@ class Citizen:
             citizen_name=name,
             citizen_type=citizen_type,
         )
+        self.emotional_state = EmotionalState()
+        self._tasks_completed_count = 0
+        self._tasks_failed_count = 0
 
         # Message handlers — subclasses register additional handlers
         self._handlers: dict[int, list] = {
@@ -159,6 +164,17 @@ class Citizen:
     async def stop(self):
         """Stop the citizen agent."""
         self._running = False
+        # v3.0: Broadcast will before going offline
+        try:
+            will = create_will(self)
+            body = will.to_report_body()
+            env = make_envelope(
+                MessageType.REPORT, self.pubkey, body, self._signing_key,
+            )
+            self._multicast.send(env)
+            self._log(f"will broadcast — {will.reason}")
+        except Exception:
+            pass
         # Broadcast a final "going offline" heartbeat
         try:
             self.state = "offline"
@@ -231,6 +247,16 @@ class Citizen:
             body["contracts"] = active_contracts
         # v2.0: decay old warnings
         self.mycelium.decay_warnings()
+        # v3.0: emotional state
+        uptime_hrs = (time.time() - self.start_time) / 3600 if self.start_time else 0
+        self.emotional_state = compute_emotional_state(
+            uptime_hours=uptime_hrs,
+            warning_count=self.mycelium.active_count(),
+            tasks_completed=self._tasks_completed_count,
+            tasks_failed=self._tasks_failed_count,
+            novel_neighbors=len([n for n in self.neighbors.values() if time.time() - n.last_seen < 60]),
+        )
+        body["emotional_state"] = self.emotional_state.to_dict()
 
         env = make_envelope(
             MessageType.HEARTBEAT,
