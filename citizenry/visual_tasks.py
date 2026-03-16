@@ -57,23 +57,53 @@ WORKSPACE = {
 }
 
 
-def camera_to_arm_position(cx: float, cy: float, reach: float = 0.5) -> dict:
-    """Convert normalized camera coordinates to arm servo positions.
+# Module-level calibration cache — loaded once, used by camera_to_arm_position
+_calibrated_transform: list[list[float]] | None = None
+_calibration_resolution: tuple[int, int] = (640, 480)
+
+
+def load_calibration_transform(name: str = "calibration") -> bool:
+    """Load a calibrated transform from disk. Returns True if loaded."""
+    global _calibrated_transform, _calibration_resolution
+    try:
+        from .calibration import load_calibration
+        result = load_calibration(name)
+        if result and result.homography:
+            _calibrated_transform = result.homography
+            _calibration_resolution = result.camera_resolution
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def camera_to_arm_position(cx: float, cy: float, reach: float = 0.5,
+                           frame_width: int = 640, frame_height: int = 480) -> dict:
+    """Convert camera coordinates to arm servo positions.
+
+    Uses calibrated homography if available, otherwise falls back to
+    the linear approximation.
 
     Args:
         cx: Normalized x position [0=left, 1=right]
         cy: Normalized y position [0=top, 1=bottom]
-        reach: How far to reach [0=close, 1=far]
+        reach: How far to reach [0=close, 1=far] (only used in fallback)
+        frame_width, frame_height: Camera resolution (for calibrated mode)
 
     Returns:
         Dict of motor_name → servo position for the SO-101.
     """
+    # Use calibrated transform if available
+    if _calibrated_transform is not None:
+        from .calibration import apply_homography
+        pixel_x = cx * frame_width
+        pixel_y = cy * frame_height
+        return apply_homography(pixel_x, pixel_y, _calibrated_transform)
+
+    # Fallback: linear approximation
     ws = WORKSPACE
-    # Map camera X to shoulder pan (mirror: camera left = arm right)
     pan = int(ws["shoulder_pan"]["max"] - cx * (ws["shoulder_pan"]["max"] - ws["shoulder_pan"]["min"]))
-    # Map camera Y to shoulder lift (top of frame = lower lift value = higher position)
     lift = int(ws["shoulder_lift"]["min"] + cy * (ws["shoulder_lift"]["max"] - ws["shoulder_lift"]["min"]))
-    # Reach determines elbow extension
     elbow = int(ws["elbow_flex"]["max"] - reach * (ws["elbow_flex"]["max"] - ws["elbow_flex"]["min"]))
 
     return {
