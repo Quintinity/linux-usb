@@ -134,6 +134,13 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
 
     aide = GovernorAide(surface)
 
+    # Try to load existing calibration
+    from .visual_tasks import load_calibration_transform
+    if load_calibration_transform("calibration"):
+        print(f"{GREEN}Calibration loaded{RESET}")
+    else:
+        print(f"{DIM}No calibration — run 'calibrate camera' for accurate pick-and-place{RESET}")
+
     print(f"\n{BOLD}Ready.{RESET} Type commands in natural language, or 'help' for options.\n")
 
     try:
@@ -171,11 +178,15 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
   {BOLD}Calibration:{RESET}
     calibrate camera        Run guided calibration
     check calibration       Validate current calibration
+  {BOLD}Rollout:{RESET}
+    rollout <law> <value>   Roll out a law change with canary testing
+    rollout status          Show active rollout status
   {BOLD}Info:{RESET}
     status                  Neighborhood status
     tasks                   Task history
     skills                  Skill levels
     contracts               Symbiosis contracts
+    wills                   Will archive
     dashboard               Web dashboard URL
     quit                    Exit
 """)
@@ -245,6 +256,41 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
                             print(f"  {GREEN}→{RESET} {entry.detail}")
                 else:
                     print(f"  {YELLOW}No arm citizen found. Connect a Pi with arm first.{RESET}")
+            elif line.startswith("rollout ") and line != "rollout status":
+                # Parse: rollout teleop_max_fps 30
+                parts = line.split()
+                if len(parts) >= 3:
+                    law_id = parts[1]
+                    try:
+                        value = int(parts[2])
+                    except ValueError:
+                        try:
+                            value = float(parts[2])
+                        except ValueError:
+                            value = parts[2]
+                    print(f"  {BOLD}Rolling out:{RESET} {law_id} = {value}")
+                    plan = surface._rolling_updater.create_rollout(
+                        "law_update",
+                        {"law_id": law_id, "params": {law_id.split("_")[-1] if "_" in law_id else "value": value}},
+                    )
+                    print(f"  Plan: {len(plan.citizens)} citizens, threshold: {plan.failure_threshold:.0%}")
+                    result = await surface._rolling_updater.execute(plan)
+                    status_color = GREEN if result.status.value == "completed" else RED
+                    print(f"  {status_color}Result: {result.status.value}{RESET} — {result.success_count}/{len(result.citizens)} succeeded")
+                else:
+                    print(f"  {YELLOW}Usage: rollout <law_id> <value>{RESET}")
+                    print(f"  {DIM}Example: rollout teleop_max_fps 30{RESET}")
+            elif line == "rollout status":
+                updater = surface._rolling_updater
+                if updater.active_rollout:
+                    r = updater.active_rollout
+                    print(f"  {BOLD}Active rollout:{RESET} {r.policy_type} — {r.progress:.0%} complete")
+                elif updater.history:
+                    last = updater.history[-1]
+                    print(f"  {BOLD}Last rollout:{RESET} {last.policy_type} — {last.status.value}")
+                    print(f"  {last.success_count}/{len(last.citizens)} succeeded")
+                else:
+                    print(f"  {DIM}No rollouts yet{RESET}")
             elif line in ("check calibration",):
                 from .calibration import load_calibration
                 cal = load_calibration("calibration")

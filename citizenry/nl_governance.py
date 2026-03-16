@@ -230,43 +230,114 @@ def parse_command(text: str) -> GovernanceAction | None:
     return None
 
 
+_LLM_PROMPT = """You are a robot governance system. Parse this command into an action.
+Valid actions: emergency_stop, law_update, task_create
+Valid tasks: basic_gesture, pick_and_place, color_detection, color_sorting, frame_capture
+Valid law_ids: teleop_max_fps, idle_timeout, heartbeat_interval, servo_limits
+
+Reply with ONLY a JSON object like: {"action": "task_create", "task": "basic_gesture", "params": {"gesture": "wave"}}
+For law updates: {"action": "law_update", "law_id": "teleop_max_fps", "params": {"fps": 30}}
+If you cannot parse the command, reply: {"action": "unknown"}
+
+Command: "%s"
+"""
+
+
 def _try_llm_parse(text: str) -> GovernanceAction | None:
-    """Try to parse command via local LLM (ollama) as fallback."""
+    """Try to parse command via LLM fallback.
+
+    Tries in order:
+    1. Claude API (anthropic SDK) if ANTHROPIC_API_KEY is set
+    2. Local ollama if installed
+    3. Returns None
+    """
+    # Try Claude API first
+    result = _try_claude_api(text)
+    if result is not None:
+        return result
+
+    # Try ollama
+    result = _try_ollama(text)
+    if result is not None:
+        return result
+
+    return None
+
+
+def _try_claude_api(text: str) -> GovernanceAction | None:
+    """Try Claude API via anthropic SDK."""
+    import json as _json
+    try:
+        import os
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            return None
+
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            messages=[{"role": "user", "content": _LLM_PROMPT % text}],
+        )
+        raw = response.content[0].text.strip()
+        # Extract JSON from response
+        for line in raw.split("\n"):
+            line = line.strip()
+            if line.startswith("{"):
+                data = _json.loads(line)
+                return _parse_llm_response(data, "claude")
+        return None
+    except Exception:
+        return None
+
+
+def _try_ollama(text: str) -> GovernanceAction | None:
+    """Try local ollama."""
     import json as _json
     import subprocess
     try:
         result = subprocess.run(
             ["ollama", "run", "phi3", "--nowordwrap"],
-            input=f"""You are a robot governance system. Parse this command into an action.
-Valid actions: emergency_stop, law_update, task_create
-Valid tasks: basic_gesture, pick_and_place, color_detection, color_sorting, frame_capture
-Reply with ONLY a JSON object like: {{"action": "task_create", "task": "basic_gesture", "params": {{"gesture": "wave"}}}}
-If you cannot parse the command, reply: {{"action": "unknown"}}
-
-Command: "{text}"
-""",
+            input=_LLM_PROMPT % text,
             capture_output=True, text=True, timeout=10,
         )
-        data = _json.loads(result.stdout.strip().split('\n')[-1])
-        if data.get("action") == "unknown":
-            return None
-        if data.get("action") == "task_create":
-            return GovernanceAction(
-                action_type="task_create",
-                params={"type": data.get("task", ""), "params": data.get("params", {}),
-                        "required_capabilities": _caps_for_task(data.get("task", "")),
-                        "required_skills": _skills_for_task(data.get("task", ""))},
-                confidence=0.6,
-                explanation=f"LLM: {data.get('task', '?')}",
-            )
-        return GovernanceAction(
-            action_type=data.get("action", "unknown"),
-            params=data.get("params", {}),
-            confidence=0.6,
-            explanation=f"LLM: {data.get('action', '?')}",
-        )
+        for line in result.stdout.strip().split('\n'):
+            line = line.strip()
+            if line.startswith("{"):
+                data = _json.loads(line)
+                return _parse_llm_response(data, "ollama")
+        return None
     except Exception:
-        return None  # ollama not available or parse failed
+        return None
+
+
+def _parse_llm_response(data: dict, source: str) -> GovernanceAction | None:
+    """Parse LLM JSON response into GovernanceAction."""
+    if data.get("action") == "unknown":
+        return None
+    if data.get("action") == "task_create":
+        return GovernanceAction(
+            action_type="task_create",
+            params={"type": data.get("task", ""), "params": data.get("params", {}),
+                    "required_capabilities": _caps_for_task(data.get("task", "")),
+                    "required_skills": _skills_for_task(data.get("task", ""))},
+            confidence=0.6,
+            explanation=f"{source}: {data.get('task', '?')}",
+        )
+    if data.get("action") == "law_update":
+        return GovernanceAction(
+            action_type="law_update",
+            params={"law_id": data.get("law_id", ""), "params": data.get("params", {})},
+            confidence=0.6,
+            explanation=f"{source}: law {data.get('law_id', '?')}",
+        )
+    return GovernanceAction(
+        action_type=data.get("action", "unknown"),
+        params=data.get("params", {}),
+        confidence=0.6,
+        explanation=f"{source}: {data.get('action', '?')}",
+    )
 
 
 def _caps_for_task(task_type: str) -> list[str]:

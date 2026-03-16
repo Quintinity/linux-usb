@@ -88,6 +88,10 @@ class SurfaceCitizen(Citizen):
         # v3.0: Task coordinator for composite tasks
         self._coordinator = TaskCoordinator(self)
 
+        # v3.0: Rolling updater
+        from .rolling_update import RollingUpdater
+        self._rolling_updater = RollingUpdater(self)
+
     async def start(self):
         # Create and sign the constitution
         self._init_constitution()
