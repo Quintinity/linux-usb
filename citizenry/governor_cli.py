@@ -32,6 +32,7 @@ from .marketplace import TaskStatus
 from .data_collection import DataCollector
 from .web_dashboard import WebDashboard
 from .dialogue import parse_question, compose_response, CitizenVoice
+from .president import President, GovernorRecord, parse_president_command
 
 BOLD = "\033[1m"
 GREEN = "\033[32m"
@@ -130,6 +131,21 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
     # Init data collector
     collector = DataCollector(surface)
     surface._data_collector = collector
+
+    # Initialize president layer
+    president = President("president")
+    # Register ourselves as a governor
+    president.register_governor(GovernorRecord(
+        pubkey=surface.pubkey,
+        name=surface.name,
+        location="local",
+        addr=("127.0.0.1", 0),
+        citizen_count=len(surface.neighbors),
+        capabilities=list(surface.capabilities),
+        composite_capabilities=getattr(surface, 'composite_capabilities', []),
+        health=surface.health,
+        last_seen=time.time(),
+    ))
 
     print_status(surface)
 
@@ -361,12 +377,43 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
                         print(f"  {YELLOW}Validation error high ({cal.validation_error:.0f}) — recalibrate recommended{RESET}")
                 else:
                     print(f"  {YELLOW}No calibration found. Run 'calibrate camera' first.{RESET}")
+            elif line in ("nation", "nation status", "fleet"):
+                # Update governor record with current state
+                president.governors[surface.pubkey].citizen_count = len(surface.neighbors)
+                president.governors[surface.pubkey].composite_capabilities = getattr(surface, 'composite_capabilities', [])
+                president.governors[surface.pubkey].last_seen = time.time()
+                president.governors[surface.pubkey].mood = surface.emotional_state.mood
+                print(f"\n{BOLD}{president.nation_summary()}{RESET}")
+            elif line == "governors":
+                for g in president.governors.values():
+                    status = f"{GREEN}online{RESET}" if g.is_online() else f"{RED}offline{RESET}"
+                    print(f"  {BOLD}{g.name}{RESET} ({g.location}) — {g.citizen_count} citizens — {status}")
+            elif line.startswith("tell ") or (": " in line and line.startswith("at ")):
+                cmd = parse_president_command(line)
+                if cmd and cmd["action"] == "delegate":
+                    target = cmd["target"]
+                    command = cmd["command"]
+                    gov = president.get_governor(target)
+                    if gov:
+                        print(f"  {GREEN}→{RESET} Delegating to {gov.name}: {command}")
+                        # Execute locally if it's us
+                        action = aide.execute(command)
+                        if action:
+                            print(f"  {GREEN}→{RESET} {action.explanation}")
+                    else:
+                        print(f"  {YELLOW}Governor '{target}' not found{RESET}")
+            elif line.startswith("all "):
+                command = line[4:].strip()
+                routes = president.route_command(command)
+                print(f"  Broadcasting to {len(routes)} governors: {command}")
+                action = aide.execute(command)
+                if action:
+                    print(f"  {GREEN}→{RESET} {action.explanation}")
             else:
                 action = aide.execute(line)
                 if action:
                     print(f"  {GREEN}→{RESET} {action.explanation}")
                     if action.action_type == "task_create":
-                        # Wait for task execution
                         await asyncio.sleep(0.5)
                         print(f"  {DIM}Task dispatched to marketplace...{RESET}")
                 else:
