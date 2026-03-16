@@ -471,31 +471,41 @@ class PiCitizen(Citizen):
             super()._handle_govern(env, addr)
 
     async def _execute_task(self, task_id: str, task_type: str, params: dict, governor_key: str, governor_addr: tuple):
-        """Execute an assigned task and report results."""
+        """Execute an assigned task with real servo movements and report results."""
+        t0 = time.time()
         try:
-            # Simulate task execution (actual execution would depend on task type)
             self._log(f"executing task: [{task_id}] {task_type}")
-            await asyncio.sleep(0.5)  # Placeholder for actual work
 
-            # Award XP
+            if task_type == "basic_gesture":
+                await self._exec_gesture(params)
+            elif task_type == "pick_and_place":
+                await self._exec_pick_and_place(params)
+            elif task_type in ("basic_movement", "precise_movement"):
+                await self._exec_move(params)
+            else:
+                # Generic task — hold for 1 second
+                await asyncio.sleep(1.0)
+
+            duration_ms = int((time.time() - t0) * 1000)
             skill_name = task_type if task_type in self.skill_tree.definitions else "basic_movement"
-            xp_earned = self.skill_tree.award_xp(skill_name, base_xp=10, task_difficulty=0.8, success_quality=1.0)
+            quality = 1.0 if duration_ms < 10000 else 0.8
+            xp_earned = self.skill_tree.award_xp(skill_name, base_xp=10, task_difficulty=0.8, success_quality=quality)
 
-            # Report success
             self.send_report(
                 governor_key,
                 {
                     "type": "task_complete",
                     "task_id": task_id,
                     "result": "success",
-                    "duration_ms": 500,
+                    "duration_ms": duration_ms,
                     "xp_earned": xp_earned,
                     "citizen": self.name,
                 },
                 governor_addr,
             )
-            self._log(f"task complete: [{task_id}] +{xp_earned} XP for {skill_name}")
+            self._log(f"task complete: [{task_id}] {duration_ms}ms +{xp_earned} XP for {skill_name}")
         except Exception as e:
+            self._log(f"task failed: [{task_id}] {e}")
             self.send_report(
                 governor_key,
                 {
@@ -511,6 +521,117 @@ class PiCitizen(Citizen):
             self._current_task_id = None
             self._current_task_type = None
             self.state = "idle"
+
+    # ── Real task executors ──
+
+    async def _exec_gesture(self, params: dict):
+        """Execute a gesture on the follower arm (wave, nod, etc.)."""
+        if not self._follower_bus:
+            raise RuntimeError("arm not connected")
+
+        gesture = params.get("gesture", "wave")
+        HOME = {n: 2048 for n in MOTOR_NAMES}
+        HOME["shoulder_lift"] = 1400
+        HOME["elbow_flex"] = 3000
+
+        if gesture == "wave":
+            poses = [
+                HOME,
+                {"shoulder_pan": 2400, "shoulder_lift": 1600, "elbow_flex": 2500, "wrist_flex": 2048, "wrist_roll": 1600, "gripper": 2048},
+                {"shoulder_pan": 1700, "shoulder_lift": 1600, "elbow_flex": 2500, "wrist_flex": 2048, "wrist_roll": 2500, "gripper": 2048},
+                {"shoulder_pan": 2400, "shoulder_lift": 1600, "elbow_flex": 2500, "wrist_flex": 2048, "wrist_roll": 1600, "gripper": 2048},
+                {"shoulder_pan": 1700, "shoulder_lift": 1600, "elbow_flex": 2500, "wrist_flex": 2048, "wrist_roll": 2500, "gripper": 2048},
+                HOME,
+            ]
+        elif gesture == "nod":
+            poses = [
+                HOME,
+                {**HOME, "wrist_flex": 1700},
+                {**HOME, "wrist_flex": 2400},
+                {**HOME, "wrist_flex": 1700},
+                HOME,
+            ]
+        elif gesture == "grip":
+            poses = [
+                HOME,
+                {**HOME, "gripper": 1400},  # open
+                {**HOME, "gripper": 2500},  # close
+                {**HOME, "gripper": 1400},  # open
+                HOME,
+            ]
+        else:
+            poses = [HOME]
+
+        self._enable_torque()
+        try:
+            for pose in poses:
+                await self._smooth_move(pose, duration=0.5)
+                await asyncio.sleep(0.3)
+        finally:
+            self._disable_torque()
+
+    async def _exec_pick_and_place(self, params: dict):
+        """Execute a pick-and-place sequence."""
+        if not self._follower_bus:
+            raise RuntimeError("arm not connected")
+
+        HOME = {"shoulder_pan": 2048, "shoulder_lift": 1400, "elbow_flex": 3000, "wrist_flex": 2048, "wrist_roll": 2048, "gripper": 2048}
+        REACH = {"shoulder_pan": 2048, "shoulder_lift": 1800, "elbow_flex": 2200, "wrist_flex": 2048, "wrist_roll": 2048, "gripper": 1400}
+        GRASP = {**REACH, "gripper": 2500}
+        LIFT = {"shoulder_pan": 2048, "shoulder_lift": 1500, "elbow_flex": 2500, "wrist_flex": 2048, "wrist_roll": 2048, "gripper": 2500}
+        PLACE = {**LIFT, "shoulder_pan": 2400}
+        RELEASE = {**PLACE, "gripper": 1400}
+
+        self._enable_torque()
+        try:
+            for pose in [HOME, REACH, GRASP, LIFT, PLACE, RELEASE, HOME]:
+                await self._smooth_move(pose, duration=0.6)
+                await asyncio.sleep(0.2)
+        finally:
+            self._disable_torque()
+
+    async def _exec_move(self, params: dict):
+        """Move to a specific pose from params, or home."""
+        if not self._follower_bus:
+            raise RuntimeError("arm not connected")
+
+        target = params.get("positions", {
+            "shoulder_pan": 2048, "shoulder_lift": 1400, "elbow_flex": 3000,
+            "wrist_flex": 2048, "wrist_roll": 2048, "gripper": 2048,
+        })
+        self._enable_torque()
+        try:
+            await self._smooth_move(target, duration=1.0)
+            await asyncio.sleep(0.5)
+        finally:
+            self._disable_torque()
+
+    async def _smooth_move(self, target: dict, duration: float = 0.5):
+        """Smoothly interpolate from current position to target over duration."""
+        if not self._follower_bus:
+            return
+        try:
+            current = self._follower_bus.sync_read("Present_Position", normalize=False)
+            current_pos = {
+                name: int(current[name]) if not hasattr(current[name], 'item') else int(current[name].item())
+                for name in MOTOR_NAMES
+            }
+        except Exception:
+            # Can't read current position — just write target directly
+            self._write_positions(target)
+            await asyncio.sleep(duration)
+            return
+
+        steps = max(1, int(duration * 30))  # 30 steps/sec
+        for i in range(steps + 1):
+            t = i / steps
+            t = t * t * (3 - 2 * t)  # Ease in-out
+            pose = {
+                name: int(current_pos.get(name, 2048) + (target.get(name, 2048) - current_pos.get(name, 2048)) * t)
+                for name in MOTOR_NAMES
+            }
+            self._write_positions(pose)
+            await asyncio.sleep(duration / steps)
 
     def _on_law_updated(self, sender: str, law_id: str, params: dict):
         """Apply law changes from the governor."""

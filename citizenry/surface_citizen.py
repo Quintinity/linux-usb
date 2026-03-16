@@ -142,8 +142,9 @@ class SurfaceCitizen(Citizen):
                 neighbor.addr,
             )
 
-        # v2.0: Check capability compositions
+        # v2.0: Check capability compositions and symbiosis
         self._update_compositions()
+        self._try_symbiosis()
 
         # If it's a manipulator and we don't have a follower yet, propose teleop
         if "6dof_arm" in neighbor.capabilities and not self._teleop_active:
@@ -193,6 +194,16 @@ class SurfaceCitizen(Citizen):
             bid = Bid.from_accept_body(body, env.sender)
             if self.marketplace.add_bid(bid):
                 self._log(f"bid received: [{bid.task_id}] from {_sid(env)} score={bid.score:.2f}")
+            return
+
+        # v2.0: Symbiosis contract acceptance
+        if body.get("accepted") and body.get("task") == "symbiosis_propose":
+            contract_id = body.get("contract_id", "")
+            accepted = self.contracts.accept(contract_id)
+            if accepted:
+                self._log(f"symbiosis active: {accepted.composite_capability} [{contract_id}]")
+                self._add_log("CONTRACT", _sid(env), f"active: {accepted.composite_capability}")
+                self._update_compositions()
             return
 
         if body.get("accepted") and task_name == "teleop":
@@ -376,6 +387,42 @@ class SurfaceCitizen(Citizen):
             self.composite_capabilities.extend(new_caps)
             self._log(f"compositions discovered: {', '.join(new_caps)}")
             self._add_log("COMPOSE", "engine", f"+{', '.join(new_caps)}")
+
+    # ── v2.0: Symbiosis auto-proposal ──
+
+    def _try_symbiosis(self):
+        """Check if any camera + arm pair can form a symbiosis contract."""
+        cameras = [n for n in self.neighbors.values() if "video_stream" in n.capabilities or "color_detection" in n.capabilities]
+        arms = [n for n in self.neighbors.values() if "6dof_arm" in n.capabilities]
+
+        existing_composites = {c.composite_capability for c in self.contracts.get_active()}
+
+        for cam in cameras:
+            for arm in arms:
+                # Check if visual_pick_and_place contract already exists between these two
+                already = any(
+                    c.provider == cam.pubkey and c.consumer == arm.pubkey
+                    for c in self.contracts.get_active()
+                )
+                if already:
+                    continue
+
+                # Propose camera → arm symbiosis
+                contract = self.contracts.propose(
+                    provider=cam.pubkey,
+                    consumer=arm.pubkey,
+                    provider_cap="video_stream",
+                    consumer_cap="6dof_arm",
+                    composite="visual_pick_and_place",
+                )
+                # Send proposal to the arm (consumer)
+                self.send_propose(
+                    arm.pubkey,
+                    contract.to_propose_body(),
+                    arm.addr,
+                )
+                self._log(f"symbiosis proposed: {cam.name} + {arm.name} → visual_pick_and_place")
+                self._add_log("CONTRACT", "governor", f"proposed: {cam.name} + {arm.name}")
 
     # ── v2.0: Genome distribution ──
 

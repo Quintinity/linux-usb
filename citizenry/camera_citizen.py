@@ -39,6 +39,7 @@ class CameraCitizen(Citizen):
         self._frame_count = 0
         self._last_frame_time: float = 0
         self._camera_ok = False
+        self._pending_task: dict | None = None
 
     async def start(self):
         await super().start()
@@ -120,6 +121,84 @@ class CameraCitizen(Citizen):
         self._unicast.send(env_out, reply_addr)
         self.messages_sent += 1
         self._log(f"bid sent: [{task.id}] {task.type} score={score:.2f}")
+        # Track pending task for execution on assignment
+        self._pending_task = {"id": task.id, "type": task.type, "params": body.get("params", {}), "governor": env.sender, "addr": reply_addr}
+
+    def _handle_govern(self, env, addr):
+        """Handle governance — including task assignments."""
+        body = env.body
+        gov_type = body.get("type", "")
+
+        if gov_type == "task_assign":
+            task_id = body.get("task_id", "")
+            task_type = body.get("task", "")
+            self._log(f"task assigned: [{task_id}] {task_type}")
+            self._add_log("TASK", self.name, f"assigned [{task_id}] {task_type}")
+            import asyncio
+            asyncio.get_event_loop().create_task(
+                self._execute_camera_task(task_id, task_type, body.get("params", {}), env.sender, addr)
+            )
+        else:
+            super()._handle_govern(env, addr)
+
+    async def _execute_camera_task(self, task_id: str, task_type: str, params: dict, governor_key: str, governor_addr: tuple):
+        """Execute a camera task with real capture/detection."""
+        import time as _time
+        t0 = _time.time()
+        try:
+            if task_type in ("color_detection", "color_sorting"):
+                detections = self._detect_colors()
+                duration_ms = int((_time.time() - t0) * 1000)
+                skill_name = "color_detection" if "color_detection" in self.skill_tree.definitions else "frame_capture"
+                xp_earned = self.skill_tree.award_xp(skill_name, base_xp=10, task_difficulty=0.8, success_quality=1.0)
+                self.send_report(
+                    governor_key,
+                    {
+                        "type": "task_complete",
+                        "task_id": task_id,
+                        "result": "success",
+                        "duration_ms": duration_ms,
+                        "xp_earned": xp_earned,
+                        "citizen": self.name,
+                        "detections": detections,
+                        "detection_count": len(detections),
+                    },
+                    governor_addr,
+                )
+                self._log(f"task complete: [{task_id}] {len(detections)} colors detected, +{xp_earned} XP")
+
+            elif task_type in ("frame_capture", "visual_inspection"):
+                frame_b64 = self._capture_frame_b64()
+                duration_ms = int((_time.time() - t0) * 1000)
+                xp_earned = self.skill_tree.award_xp("frame_capture", base_xp=10, task_difficulty=0.5, success_quality=1.0)
+                self.send_report(
+                    governor_key,
+                    {
+                        "type": "task_complete",
+                        "task_id": task_id,
+                        "result": "success" if frame_b64 else "failed",
+                        "duration_ms": duration_ms,
+                        "xp_earned": xp_earned,
+                        "citizen": self.name,
+                        "frame_size_kb": len(frame_b64) / 1024 if frame_b64 else 0,
+                    },
+                    governor_addr,
+                )
+                self._log(f"task complete: [{task_id}] frame captured, +{xp_earned} XP")
+
+            else:
+                self.send_report(
+                    governor_key,
+                    {"type": "task_complete", "task_id": task_id, "result": "failed", "reason": f"unknown task type: {task_type}", "citizen": self.name},
+                    governor_addr,
+                )
+        except Exception as e:
+            self._log(f"task failed: [{task_id}] {e}")
+            self.send_report(
+                governor_key,
+                {"type": "task_complete", "task_id": task_id, "result": "failed", "reason": str(e), "citizen": self.name},
+                governor_addr,
+            )
 
     def _handle_frame_capture(self, env, addr, body):
         """Capture a frame and return it as base64 JPEG."""
