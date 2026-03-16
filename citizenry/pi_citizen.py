@@ -171,6 +171,8 @@ class PiCitizen(Citizen):
             self._handle_dialogue(env, addr, body)
         elif task == "calibrate":
             self._handle_calibrate(env, addr, body)
+        elif task == "self_calibrate":
+            self._handle_self_calibrate(env, addr, body)
         elif body.get("task_id"):
             # v2.0: Marketplace task proposal — evaluate and bid
             self._handle_marketplace_propose(env, addr, body)
@@ -350,6 +352,57 @@ class PiCitizen(Citizen):
             },
             addr,
         )
+
+    def _handle_self_calibrate(self, env, addr, body):
+        """Run self-calibration: discover physical joint limits by stall detection."""
+        self.send_accept(env.sender, body, addr)
+        self._log("self-calibration starting — arm will move each motor to find limits")
+        import asyncio
+        asyncio.get_event_loop().create_task(
+            self._run_self_calibration(env.sender, addr)
+        )
+
+    async def _run_self_calibration(self, governor_key: str, governor_addr: tuple):
+        """Execute self-calibration and report results."""
+        try:
+            from .self_calibration import self_calibrate_all
+
+            if not self._follower_bus:
+                self._follower_bus = self._init_follower_bus()
+            if not self._follower_bus:
+                self.send_report(governor_key,
+                    {"type": "self_calibration_complete", "citizen": self.name, "error": "arm not connected"},
+                    governor_addr)
+                return
+
+            result = self_calibrate_all(
+                self._follower_bus,
+                log_fn=lambda msg: self._log(f"cal: {msg}"),
+            )
+
+            # Save limits to genome
+            self.genome.calibration["motor_limits"] = {
+                name: limits.to_dict() for name, limits in result.motors.items()
+            }
+
+            # Report to governor
+            self.send_report(
+                governor_key,
+                {
+                    "type": "self_calibration_complete",
+                    "citizen": self.name,
+                    "motors": {k: v.to_dict() for k, v in result.motors.items()},
+                    "duration_s": result.duration_s,
+                },
+                governor_addr,
+            )
+            self._log(f"self-calibration complete in {result.duration_s:.1f}s")
+
+        except Exception as e:
+            self._log(f"self-calibration error: {e}")
+            self.send_report(governor_key,
+                {"type": "self_calibration_complete", "citizen": self.name, "error": str(e)},
+                governor_addr)
 
     def _handle_calibrate(self, env, addr, body):
         """Run camera-arm calibration locally on the Pi."""

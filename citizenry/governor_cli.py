@@ -328,6 +328,20 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
                     print(f"  {YELLOW}{result['error']}{RESET}")
                 else:
                     print(f"  {GREEN}Episode saved:{RESET} {result['frames']} frames, {result['duration_s']}s")
+            elif line in ("self calibrate", "self-calibrate", "find limits"):
+                arm = next((n for n in surface.neighbors.values() if "6dof_arm" in n.capabilities), None)
+                if arm:
+                    print(f"  {BOLD}Self-calibrating {arm.name}...{RESET}")
+                    print(f"  {DIM}Each motor will move to find physical limits by stall detection.{RESET}")
+                    print(f"  {DIM}This takes ~2 minutes. Do not touch the arm.{RESET}")
+                    surface.send_propose(arm.pubkey, {"task": "self_calibrate"}, arm.addr)
+                    print(f"  {DIM}Waiting for results...{RESET}")
+                    await asyncio.sleep(120)
+                    for entry in list(surface.message_log)[-15:]:
+                        if "self-cal" in entry.detail.lower() or "calibrat" in entry.detail.lower():
+                            print(f"  {GREEN}→{RESET} {entry.detail}")
+                else:
+                    print(f"  {YELLOW}No arm found{RESET}")
             elif line in ("calibrate camera", "calibrate", "run calibration"):
                 # Find a Pi citizen that has both arm and camera capabilities nearby
                 arm_citizen = None

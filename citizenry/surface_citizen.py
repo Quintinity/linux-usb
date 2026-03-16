@@ -331,6 +331,21 @@ class SurfaceCitizen(Citizen):
             self._add_log("CONSCIOUSNESS", citizen_name, narration)
             return
 
+        # v4.0: Self-calibration result
+        if report_type == "self_calibration_complete":
+            error = body.get("error")
+            if error:
+                self._log(f"self-calibration FAILED: {error}")
+                self._add_log("CALIBRATE", _sid(env), f"self-cal failed: {error}")
+            else:
+                motors = body.get("motors", {})
+                duration = body.get("duration_s", 0)
+                self._log(f"self-calibration complete: {len(motors)} motors in {duration:.1f}s")
+                self._add_log("CALIBRATE", _sid(env), f"self-cal: {len(motors)} motors")
+                for name, limits in motors.items():
+                    self._log(f"  {name}: {limits['min']} → {limits['max']} (range={limits['range']})")
+            return
+
         # v3.0: Calibration result from Pi
         if report_type == "calibration_complete":
             error = body.get("error")
