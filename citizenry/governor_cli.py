@@ -31,6 +31,7 @@ from .nl_governance import GovernorAide, parse_command
 from .marketplace import TaskStatus
 from .data_collection import DataCollector
 from .web_dashboard import WebDashboard
+from .dialogue import parse_question, compose_response, CitizenVoice
 
 BOLD = "\033[1m"
 GREEN = "\033[32m"
@@ -221,6 +222,40 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
                     print(f"  {DIM}No model weights registered{RESET}")
             elif line == "dashboard":
                 print(f"  {GREEN}http://0.0.0.0:8080{RESET}")
+            elif line.startswith("ask ") or line.startswith("talk to "):
+                # Ask a citizen a question: "ask pi-follower how are you"
+                parts = line.split(None, 2)
+                if len(parts) >= 3:
+                    target_name = parts[1]
+                    question = parts[2]
+                    # Find the target citizen
+                    target = next((n for n in surface.neighbors.values() if n.name == target_name), None)
+                    if target:
+                        q_type = parse_question(question)
+                        # For now compose locally from governor's view of citizen
+                        # In future: send PROPOSE dialogue to citizen, get REPORT response
+                        print(f"\n  {BOLD}[{target.name}]:{RESET}")
+                        # Compose basic response from what governor knows
+                        health_pct = int(target.health * 100)
+                        mood = target.emotional_state.mood if target.emotional_state else "unknown"
+                        state = target.state
+                        presence = target.presence.value
+                        print(f"  Health: {health_pct}% | State: {state} | Mood: {mood} | Presence: {presence}")
+                        caps = ", ".join(target.capabilities)
+                        print(f"  Capabilities: {caps}")
+                        if target.emotional_state:
+                            e = target.emotional_state
+                            print(f"  Fatigue: {e.fatigue:.0%} | Confidence: {e.confidence:.0%} | Curiosity: {e.curiosity:.0%}")
+                    else:
+                        print(f"  {YELLOW}Citizen '{target_name}' not found. Known: {', '.join(n.name for n in surface.neighbors.values())}{RESET}")
+                else:
+                    print(f"  {DIM}Usage: ask <citizen-name> <question>{RESET}")
+                    print(f"  {DIM}Example: ask pi-follower how are you{RESET}")
+            elif line.startswith("how am i") or line == "self":
+                # Governor asks about itself
+                voice = CitizenVoice(surface)
+                print(f"\n  {BOLD}[{surface.name}]:{RESET}")
+                print(f"  {voice.how_are_you()}")
             elif line in ("policy history", "history"):
                 entries = aide.get_policy_history(10)
                 if entries:

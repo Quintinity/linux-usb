@@ -167,6 +167,8 @@ class PiCitizen(Citizen):
             self._handle_teleop_frame(env, body)
         elif task == "symbiosis_propose":
             self._handle_symbiosis_propose(env, addr, body)
+        elif task == "dialogue":
+            self._handle_dialogue(env, addr, body)
         elif task == "calibrate":
             self._handle_calibrate(env, addr, body)
         elif body.get("task_id"):
@@ -330,6 +332,24 @@ class PiCitizen(Citizen):
         self.messages_sent += 1
         self._log(f"symbiosis accepted: {contract.composite_capability} with [{env.sender[:8]}]")
         self._add_log("CONTRACT", self.name, f"accepted: {contract.composite_capability}")
+
+    def _handle_dialogue(self, env, addr, body):
+        """Respond to a dialogue question from the governor."""
+        from .dialogue import parse_question, compose_response
+        question = body.get("text", "how are you")
+        q_type = parse_question(question)
+        response_text = compose_response(self, q_type)
+        self._log(f"dialogue: '{question}' → '{response_text[:60]}...'")
+        self.send_report(
+            env.sender,
+            {
+                "type": "dialogue_response",
+                "citizen": self.name,
+                "question": question,
+                "response": response_text,
+            },
+            addr,
+        )
 
     def _handle_calibrate(self, env, addr, body):
         """Run camera-arm calibration locally on the Pi."""
