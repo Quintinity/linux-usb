@@ -748,11 +748,61 @@ class PiCitizen(Citizen):
             # Delegate to base class for constitution, laws, genome, skills, etc.
             super()._handle_govern(env, addr)
 
+    def _read_all_positions(self) -> dict[str, int]:
+        """Read current positions from all servos."""
+        if not self._follower_bus:
+            return {}
+        try:
+            positions = self._follower_bus.sync_read("Present_Position", normalize=False, num_retry=3)
+            return {
+                name: int(positions[name]) if not hasattr(positions[name], 'item')
+                else int(positions[name].item())
+                for name in MOTOR_NAMES
+            }
+        except Exception:
+            return {}
+
+    def _read_all_currents(self) -> list[float]:
+        """Read current draw from all servos."""
+        if not self._follower_bus:
+            return []
+        ph = self._follower_bus.packet_handler
+        port = self._follower_bus.port_handler
+        currents = []
+        for mid in range(1, 7):
+            try:
+                val, r, _ = ph.read2ByteTxRx(port, mid, 69)
+                if r == 0:
+                    currents.append((val & 0x7FFF) * 6.5)
+                else:
+                    currents.append(0.0)
+            except Exception:
+                currents.append(0.0)
+        return currents
+
     async def _execute_task(self, task_id: str, task_type: str, params: dict, governor_key: str, governor_addr: tuple):
         """Execute an assigned task with real servo movements and report results."""
         t0 = time.time()
+
+        # Begin episode recording with camera
+        self.episode_recorder.begin_episode(
+            f"{task_type}/{params.get('gesture', '')}".rstrip('/'),
+            params=params,
+            camera_index=0,  # Try to use camera on Pi
+        )
+
         try:
             self._log(f"executing task: [{task_id}] {task_type}")
+
+            # Record initial state
+            positions = self._read_all_positions()
+            currents = self._read_all_currents()
+            self.episode_recorder.record_frame(
+                joint_positions=positions,
+                action_positions=positions,
+                joint_currents=currents,
+                reward=0.0,
+            )
 
             if task_type == "basic_gesture":
                 await self._exec_gesture(params)
@@ -761,13 +811,29 @@ class PiCitizen(Citizen):
             elif task_type in ("basic_movement", "precise_movement"):
                 await self._exec_move(params)
             else:
-                # Generic task — hold for 1 second
                 await asyncio.sleep(1.0)
+
+            # Record final state
+            final_positions = self._read_all_positions()
+            final_currents = self._read_all_currents()
+            self.episode_recorder.record_frame(
+                joint_positions=final_positions,
+                action_positions=final_positions,
+                joint_currents=final_currents,
+                reward=1.0,
+            )
 
             duration_ms = int((time.time() - t0) * 1000)
             skill_name = task_type if task_type in self.skill_tree.definitions else "basic_movement"
             quality = 1.0 if duration_ms < 10000 else 0.8
             xp_earned = self.skill_tree.award_xp(skill_name, base_xp=10, task_difficulty=0.8, success_quality=quality)
+
+            # End episode as success
+            self.episode_recorder.end_episode(
+                success=True,
+                notes=f"{task_type} {duration_ms}ms +{xp_earned}XP",
+                final_reward=1.0,
+            )
 
             self.send_report(
                 governor_key,
@@ -778,14 +844,15 @@ class PiCitizen(Citizen):
                     "duration_ms": duration_ms,
                     "xp_earned": xp_earned,
                     "citizen": self.name,
+                    "episode_id": self.episode_recorder._episode_count,
                 },
                 governor_addr,
             )
-            self._log(f"task complete: [{task_id}] {duration_ms}ms +{xp_earned} XP for {skill_name}")
-            # v4.0: Feed biological subsystems
+            self._log(f"task complete: [{task_id}] {duration_ms}ms +{xp_earned} XP (episode {self.episode_recorder._episode_count})")
             self._on_task_completed(task_type, skill_name, True, duration_ms)
         except Exception as e:
             self._log(f"task failed: [{task_id}] {e}")
+            self.episode_recorder.end_episode(success=False, notes=str(e))
             self.send_report(
                 governor_key,
                 {
@@ -797,7 +864,6 @@ class PiCitizen(Citizen):
                 },
                 governor_addr,
             )
-            # v4.0: Feed biological subsystems on failure
             self._on_task_completed(task_type, task_type, False)
         finally:
             self._current_task_id = None
@@ -905,6 +971,7 @@ class PiCitizen(Citizen):
             return
 
         steps = max(1, int(duration * 30))  # 30 steps/sec
+        record_every = max(1, steps // 5)  # Record ~5 frames per move
         for i in range(steps + 1):
             t = i / steps
             t = t * t * (3 - 2 * t)  # Ease in-out
@@ -913,6 +980,16 @@ class PiCitizen(Citizen):
                 for name in MOTOR_NAMES
             }
             self._write_positions(pose)
+
+            # Record frame during movement (every few steps)
+            if self.episode_recorder.is_recording and i % record_every == 0:
+                actual = self._read_all_positions()
+                self.episode_recorder.record_frame(
+                    joint_positions=actual or pose,
+                    action_positions=pose,
+                    reward=0.5,
+                )
+
             await asyncio.sleep(duration / steps)
 
     def _on_law_updated(self, sender: str, law_id: str, params: dict):
