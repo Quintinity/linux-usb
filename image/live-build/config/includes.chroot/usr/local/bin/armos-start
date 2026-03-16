@@ -1,0 +1,5 @@
+#!/bin/bash
+# armOS Launch Script — activates venv and starts governor CLI
+source /opt/armos/env/bin/activate
+cd /opt/armos
+exec python -m citizenry

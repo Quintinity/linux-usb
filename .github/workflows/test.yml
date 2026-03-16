@@ -1,0 +1,35 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install pynacl zeroconf opencv-python-headless aiohttp numpy
+          pip install pytest pytest-asyncio pytest-cov
+
+      - name: Run citizenry tests
+        run: python -m pytest citizenry/tests/ -q --tb=short
+
+      - name: Run armos tests
+        run: python -m pytest armos/tests/ -q --tb=short
+
+      - name: Report coverage
+        run: |
+          python -m pytest citizenry/tests/ armos/tests/ \
+            --cov=citizenry --cov=armos \
+            --cov-report=term-missing \
+            -q --tb=short

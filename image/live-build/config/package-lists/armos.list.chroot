@@ -1,0 +1,10 @@
+python3.12
+python3.12-venv
+python3-pip
+git
+curl
+wget
+v4l-utils
+ffmpeg
+usbutils
+udev

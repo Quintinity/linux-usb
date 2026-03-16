@@ -1,0 +1,16 @@
+[Unit]
+Description=armOS Governor — Citizenry Control Station
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/armos-start
+User=armos
+WorkingDirectory=/opt/armos
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
