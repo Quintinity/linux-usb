@@ -31,6 +31,7 @@ from .nl_governance import GovernorAide, parse_command
 from .marketplace import TaskStatus
 from .data_collection import DataCollector
 from .web_dashboard import WebDashboard
+from .recorder import TimelineRecorder, list_sessions
 from .dialogue import parse_question, compose_response, CitizenVoice
 from .president import President, GovernorRecord, parse_president_command
 
@@ -316,6 +317,39 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
                         print(f"  {DIM}{name}{RESET} — {reason} | task: {task} | {xp_count} XP entries")
                 else:
                     print(f"  {DIM}No wills received yet{RESET}")
+            elif line.startswith("record session"):
+                parts = line.split(None, 2)
+                session_name = parts[2] if len(parts) > 2 else None
+                recorder = TimelineRecorder(session_name)
+                recorder.start(camera_index=0)
+                surface._recorder = recorder
+                print(f"  {GREEN}Recording session: {recorder.session_name}{RESET}")
+                print(f"  {DIM}Video + telemetry + commands + events{RESET}")
+            elif line == "stop session":
+                if hasattr(surface, '_recorder') and surface._recorder and surface._recorder.is_recording:
+                    meta = surface._recorder.stop()
+                    print(f"  {GREEN}Session saved: {meta.name}{RESET}")
+                    print(f"  Video: {meta.video_frames} frames, Telemetry: {meta.telemetry_samples}, Commands: {meta.commands}")
+                    surface._recorder = None
+                else:
+                    print(f"  {DIM}No recording session active{RESET}")
+            elif line == "sessions":
+                sessions = list_sessions()
+                if sessions:
+                    print(f"\n{BOLD}Recording Sessions ({len(sessions)}):{RESET}")
+                    for s in sessions:
+                        name = s.get("name", "?")
+                        dur = s.get("duration_s", 0)
+                        frames = s.get("video_frames", 0)
+                        print(f"  {name} — {dur:.0f}s, {frames} frames")
+                else:
+                    print(f"  {DIM}No recordings yet{RESET}")
+            elif line.startswith("analyze "):
+                session_name = line.split(None, 1)[1].strip()
+                print(f"  {BOLD}Analyzing {session_name}...{RESET}")
+                from .analyzer import analyze_session
+                result = analyze_session(session_name, log_fn=lambda m: print(f"  {DIM}{m}{RESET}"))
+                print(f"  {GREEN}Done:{RESET} {result.total_frames} frames, {result.total_commands} commands, {len(result.detected_stalls)} stalls")
             elif line.startswith("start recording"):
                 task_label = line.replace("start recording", "").strip() or "teleoperation"
                 if collector.start_recording(task_label):
