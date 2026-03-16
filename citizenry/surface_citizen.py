@@ -18,6 +18,7 @@ from .composition import CompositionEngine
 from .genome import CitizenGenome, compute_fleet_average
 from .skills import default_manipulator_skills, default_camera_skills
 from .immune import FaultPattern
+from .coordinator import TaskCoordinator
 
 # Motor names matching SO-101 joint order
 MOTOR_NAMES = [
@@ -83,6 +84,9 @@ class SurfaceCitizen(Citizen):
         # v2.0: Initialize governor's skill tree with all defaults
         self.skill_tree.merge_definitions(default_manipulator_skills())
         self.skill_tree.merge_definitions(default_camera_skills())
+
+        # v3.0: Task coordinator for composite tasks
+        self._coordinator = TaskCoordinator(self)
 
     async def start(self):
         # Create and sign the constitution

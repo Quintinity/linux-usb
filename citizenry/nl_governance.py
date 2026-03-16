@@ -267,9 +267,28 @@ class GovernorAide:
         self.governor.update_law(law_id, law_params)
 
     def _do_task_create(self, params: dict):
-        """Create a task through the marketplace."""
+        """Create a task through the marketplace or coordinator for composite tasks."""
+        task_type = params.get("type", "")
+
+        # Composite tasks go through the coordinator
+        if task_type in ("color_sorting",) and hasattr(self.governor, '_coordinator'):
+            import asyncio
+            asyncio.get_event_loop().create_task(
+                self.governor._coordinator.execute_color_sorting()
+            )
+            return
+
+        if task_type == "pick_and_place" and hasattr(self.governor, '_coordinator'):
+            target_color = params.get("params", {}).get("target_color")
+            import asyncio
+            asyncio.get_event_loop().create_task(
+                self.governor._coordinator.execute_visual_pick_and_place(target_color=target_color)
+            )
+            return
+
+        # Simple tasks go directly to marketplace
         self.governor.create_task(
-            task_type=params.get("type", ""),
+            task_type=task_type,
             params=params.get("params", {}),
             priority=0.7,
             required_capabilities=params.get("required_capabilities", []),
