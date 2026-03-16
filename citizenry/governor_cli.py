@@ -432,14 +432,60 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
                 if action:
                     print(f"  {GREEN}→{RESET} {action.explanation}")
             else:
-                action = aide.execute(line)
-                if action:
-                    print(f"  {GREEN}→{RESET} {action.explanation}")
-                    if action.action_type == "task_create":
-                        await asyncio.sleep(0.5)
-                        print(f"  {DIM}Task dispatched to marketplace...{RESET}")
-                else:
-                    print(f"  {YELLOW}?{RESET} Not understood. Try 'help' for commands.")
+                # Check if the line starts with a citizen name → direct command
+                handled = False
+                for n in surface.neighbors.values():
+                    if line.lower().startswith(n.name.lower() + " "):
+                        citizen_cmd = line[len(n.name):].strip()
+                        print(f"  {BOLD}→ {n.name}:{RESET} {citizen_cmd}")
+
+                        # Is it a question? (ask-style)
+                        q_type = parse_question(citizen_cmd)
+                        if any(w in citizen_cmd.lower() for w in ("how are", "status", "hurt", "remember", "goal", "tired", "growth")):
+                            # Send dialogue to citizen
+                            surface.send_propose(
+                                n.pubkey,
+                                {"task": "dialogue", "text": citizen_cmd},
+                                n.addr,
+                            )
+                            await asyncio.sleep(2)
+                            # Check for response in message log
+                            for entry in list(surface.message_log)[-5:]:
+                                if "dialogue" in entry.msg_type.lower() or "dialogue" in entry.detail.lower():
+                                    print(f"  {GREEN}[{n.name}]:{RESET} {entry.detail}")
+                            handled = True
+                        else:
+                            # It's a task command directed at this citizen
+                            from .nl_governance import parse_command
+                            action = parse_command(citizen_cmd)
+                            if action and action.action_type == "task_create":
+                                # Create task with required capabilities matching this citizen
+                                task = surface.create_task(
+                                    task_type=action.params.get("type", ""),
+                                    params=action.params.get("params", {}),
+                                    priority=0.9,  # Higher priority for direct commands
+                                    required_capabilities=action.params.get("required_capabilities", []),
+                                    required_skills=action.params.get("required_skills", []),
+                                )
+                                print(f"  {GREEN}→{RESET} Task [{task.id}] dispatched: {action.explanation}")
+                                await asyncio.sleep(0.5)
+                            elif action:
+                                aide.execute(citizen_cmd)
+                                print(f"  {GREEN}→{RESET} {action.explanation}")
+                            else:
+                                print(f"  {YELLOW}?{RESET} Didn't understand command for {n.name}")
+                            handled = True
+                        break
+
+                if not handled:
+                    action = aide.execute(line)
+                    if action:
+                        print(f"  {GREEN}→{RESET} {action.explanation}")
+                        if action.action_type == "task_create":
+                            await asyncio.sleep(0.5)
+                            print(f"  {DIM}Task dispatched to marketplace...{RESET}")
+                    else:
+                        print(f"  {YELLOW}?{RESET} Not understood. Try 'help' for commands.")
 
             # Brief pause for protocol messages to flow
             await asyncio.sleep(0.1)
