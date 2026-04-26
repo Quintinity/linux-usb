@@ -25,6 +25,10 @@ PUBKEY = KEY.verify_key.encode().hex()
 
 def _fixture(name, env: Envelope) -> dict:
     sig_bytes = env.signable_bytes()
+    # Full on-the-wire bytes (Envelope.to_bytes()): JSON dump including the
+    # `signature` field, sort_keys=True, no whitespace. The dispatcher tests
+    # parse this and re-verify against the canonical signable_bytes.
+    wire_bytes = env.to_bytes()
     return {
         "name": name,
         "signing_seed_hex": TEST_SEED.hex(),
@@ -40,6 +44,7 @@ def _fixture(name, env: Envelope) -> dict:
         },
         "signable_bytes_hex": sig_bytes.hex(),
         "signature_hex": env.signature,
+        "wire_hex": wire_bytes.hex(),
     }
 
 
@@ -108,6 +113,46 @@ def main():
         make_envelope(MessageType.HEARTBEAT, PUBKEY,
                       {"a": {"b": {"c": [1, 2, 3]}}, "z": True, "n": None},
                       KEY)
+    ))
+
+    # Phase 2 dispatcher fixtures.
+    # `discover_from_xiao` mirrors the body the XIAO will emit (name encodes
+    # the MAC suffix). `report_govern_ack` is the shape the GOVERN handler
+    # will send back to the governor.
+    fixtures.append(_fixture(
+        "discover_from_xiao",
+        make_envelope(MessageType.DISCOVER, PUBKEY,
+                      {"name": "xiao-cam-934c", "type": "sensor",
+                       "unicast_port": 51404},
+                      KEY)
+    ))
+
+    fixtures.append(_fixture(
+        "heartbeat_from_xiao",
+        make_envelope(MessageType.HEARTBEAT, PUBKEY,
+                      {"name": "xiao-cam-934c", "state": "ok", "health": 1.0,
+                       "unicast_port": 51404, "uptime": 42.125},
+                      KEY)
+    ))
+
+    fixtures.append(_fixture(
+        "advertise_from_xiao",
+        make_envelope(MessageType.ADVERTISE, PUBKEY,
+                      {"name": "xiao-cam-934c", "type": "sensor",
+                       "capabilities": ["video_stream", "frame_capture"],
+                       "health": 1.0, "state": "ok",
+                       "unicast_port": 51404, "has_constitution": True},
+                      KEY,
+                      recipient="ee" * 32)
+    ))
+
+    fixtures.append(_fixture(
+        "report_govern_ack",
+        make_envelope(MessageType.REPORT, PUBKEY,
+                      {"task": "govern_ack", "result": "success",
+                       "constitution_version": 1},
+                      KEY,
+                      recipient="ee" * 32)
     ))
 
     out_dir = Path(__file__).resolve().parents[2] / "xiao-citizen" / "tests"

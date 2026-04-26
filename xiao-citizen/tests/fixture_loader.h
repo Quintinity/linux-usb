@@ -13,6 +13,7 @@ struct Fixture {
     std::string signature;        // hex
     std::string verify_key;       // hex
     std::string signing_seed;     // hex
+    std::string wire_bytes;       // full Envelope.to_bytes() for dispatcher tests
 };
 
 inline std::string hex_decode(const std::string& h) {
@@ -55,6 +56,9 @@ inline std::vector<Fixture> load_fixtures(const std::string& path) {
         x.signature = fx["signature_hex"].get<std::string>();
         x.verify_key = fx["verify_key_hex"].get<std::string>();
         x.signing_seed = fx["signing_seed_hex"].get<std::string>();
+        if (fx.contains("wire_hex")) {
+            x.wire_bytes = hex_decode(fx["wire_hex"].get<std::string>());
+        }
         const auto& e = fx["envelope"];
         x.envelope.version = e["version"].get<int>();
         x.envelope.type = e["type"].get<int>();
