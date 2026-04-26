@@ -13,6 +13,7 @@
 #include "board_config.h"
 #include "camera_pins.h"
 #include "citizenry_identity.h"
+#include "citizenry_transport.h"
 
 // ===== build-time configuration =====
 static const char* WIFI_SSID = "Bradley-Starlink";
@@ -28,8 +29,19 @@ static String make_citizen_name() {
     return String(buf);
 }
 
-static Identity g_identity;
-static String   g_name;
+// Derive a deterministic per-device unicast port from the last two bytes of
+// the MAC (range 50000-65535). Arduino WiFiUDP doesn't expose the OS-picked
+// port when binding to 0, so we choose explicitly and announce via mDNS TXT.
+static uint16_t make_unicast_port() {
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    uint16_t low = ((uint16_t)mac[4] << 8) | mac[5];
+    return 50000u + (low % 15000u);
+}
+
+static Identity            g_identity;
+static String              g_name;
+static CitizenryTransport  g_xport;
 
 void setup() {
     Serial.begin(115200);
@@ -58,6 +70,19 @@ void setup() {
     // pubkey_hex() returns std::string; convert for Arduino printf via .c_str()
     Serial.printf("pubkey: %s\n", g_identity.pubkey_hex().c_str());
 
+    // Transport — UDP multicast group + per-device unicast socket on a
+    // MAC-derived port (announced via mDNS TXT in Task 1.3).
+    uint16_t ucast_port = make_unicast_port();
+    bool xport_ok = g_xport.begin([](const std::string& bytes, IPAddress ip, uint16_t port) {
+        Serial.printf("[recv %u bytes from %s:%u]\n",
+                      (unsigned)bytes.size(), ip.toString().c_str(), port);
+    }, ucast_port);
+    if (xport_ok) {
+        Serial.printf("transport ready, unicast=:%u\n", g_xport.unicast_port());
+    } else {
+        Serial.println("transport begin FAILED");
+    }
+
     // mDNS — TXT records and citizenry service get added in Task 1.3
     if (MDNS.begin(g_name.c_str())) {
         MDNS.addService("http", "tcp", 80);
@@ -65,4 +90,7 @@ void setup() {
     }
 }
 
-void loop() { delay(1000); }
+void loop() {
+    g_xport.poll();
+    delay(2);
+}
