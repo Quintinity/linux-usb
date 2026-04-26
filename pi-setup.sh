@@ -26,7 +26,7 @@ echo -e "${GREEN}============================================${NC}"
 echo ""
 
 # ── Step 1: Verify we're on RPi 5 ───────────────────────────────────────────
-echo -e "${YELLOW}[1/10] Checking hardware...${NC}"
+echo -e "${YELLOW}[1/11] Checking hardware...${NC}"
 if [ -f /proc/device-tree/model ]; then
     MODEL=$(cat /proc/device-tree/model | tr -d '\0')
     echo -e "  ${GREEN}Board: $MODEL${NC}"
@@ -54,7 +54,7 @@ else
 fi
 
 # ── Step 2: System update + core packages ────────────────────────────────────
-echo -e "${YELLOW}[2/10] Installing system packages...${NC}"
+echo -e "${YELLOW}[2/11] Installing system packages...${NC}"
 sudo apt update
 sudo apt install -y git curl wget build-essential cmake pkg-config \
     python3-dev python3-venv python3-pip \
@@ -67,7 +67,7 @@ sudo apt install -y git curl wget build-essential cmake pkg-config \
     dkms
 
 # ── Step 3: Install Python 3.11 (if on Trixie with 3.13) ────────────────────
-echo -e "${YELLOW}[3/10] Checking Python version...${NC}"
+echo -e "${YELLOW}[3/11] Checking Python version...${NC}"
 PYTHON_VERSION=$(python3 --version | awk '{print $2}')
 PYTHON_MAJOR_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f1,2)
 
@@ -94,7 +94,7 @@ else
 fi
 
 # ── Step 4: Install Hailo runtime ────────────────────────────────────────────
-echo -e "${YELLOW}[4/10] Installing Hailo AI HAT support...${NC}"
+echo -e "${YELLOW}[4/11] Installing Hailo AI HAT support...${NC}"
 if dpkg -l | grep -q hailo-all 2>/dev/null; then
     echo -e "  ${GREEN}hailo-all already installed${NC}"
 else
@@ -110,7 +110,7 @@ if [ -e /dev/hailo0 ]; then
 fi
 
 # ── Step 5: Create Python venv with system site-packages ─────────────────────
-echo -e "${YELLOW}[5/10] Creating Python virtual environment...${NC}"
+echo -e "${YELLOW}[5/11] Creating Python virtual environment...${NC}"
 VENV_DIR=~/armos-env
 
 if [ -d "$VENV_DIR" ]; then
@@ -125,7 +125,7 @@ source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
 
 # ── Step 6: Install LeRobot ──────────────────────────────────────────────────
-echo -e "${YELLOW}[6/10] Installing LeRobot v0.5.0...${NC}"
+echo -e "${YELLOW}[6/11] Installing LeRobot v0.5.0...${NC}"
 pip install "lerobot==0.5.0" || {
     echo -e "  ${YELLOW}LeRobot 0.5.0 failed — trying from source...${NC}"
     pip install "lerobot>=0.4.0"
@@ -140,7 +140,7 @@ python -c "import lerobot; print(f'LeRobot {lerobot.__version__} installed')" ||
 }
 
 # ── Step 7: Apply LeRobot patches (sync_read retry fix) ─────────────────────
-echo -e "${YELLOW}[7/10] Applying LeRobot patches...${NC}"
+echo -e "${YELLOW}[7/11] Applying LeRobot patches...${NC}"
 
 SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
 
@@ -179,7 +179,7 @@ if [ -f "$MOTORS_FILE" ]; then
 fi
 
 # ── Step 8: Configure udev rules and permissions ─────────────────────────────
-echo -e "${YELLOW}[8/10] Configuring USB serial access...${NC}"
+echo -e "${YELLOW}[8/11] Configuring USB serial access...${NC}"
 
 # Feetech servo controller udev rule
 echo 'SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", MODE="0660", GROUP="dialout"' \
@@ -196,7 +196,7 @@ if dpkg -l | grep -q "ii  brltty" 2>/dev/null; then
 fi
 
 # ── Step 9: Boot-time auto-start (WiFi autoconnect + systemd service) ───────
-echo -e "${YELLOW}[9/10] Configuring boot-time auto-start...${NC}"
+echo -e "${YELLOW}[9/11] Configuring boot-time auto-start...${NC}"
 
 # WiFi: unblock the radio, enable NetworkManager at boot, mark every saved
 # wireless profile as autoconnect. This makes the Pi come up on WiFi after
@@ -250,7 +250,7 @@ echo -e "  ${GREEN}citizenry-pi.service installed and enabled${NC}"
 echo -e "  ${CYAN}Starts on every boot. Use: sudo systemctl {start|stop|status} citizenry-pi${NC}"
 
 # ── Step 10: Copy diagnostic tools ──────────────────────────────────────────
-echo -e "${YELLOW}[10/10] Setting up diagnostic tools...${NC}"
+echo -e "${YELLOW}[10/11] Setting up diagnostic tools...${NC}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd || echo "$HOME/linux-usb")"
 
@@ -264,6 +264,24 @@ if [ -f "$SCRIPT_DIR/diagnose_arms.py" ]; then
 else
     echo -e "  ${YELLOW}Diagnostic tools not found locally — clone the repo:${NC}"
     echo -e "  ${CYAN}git clone https://github.com/Quintinity/linux-usb.git ~/linux-usb${NC}"
+fi
+
+# ── Step 11: Refresh Claude device persona ──────────────────────────────────
+echo -e "${YELLOW}[11/11] Refreshing Claude device persona...${NC}"
+
+# Writes ~/CLAUDE.md and a memory file describing this device's citizenry
+# role (ManipulatorNode / GovernorNode / PolicyNode), enabled services,
+# hardware survey, and node pubkey. Re-run anytime hardware or services
+# change. Idempotent.
+if [ -f "$SCRIPT_DIR/scripts/claude-persona-refresh.sh" ]; then
+    bash "$SCRIPT_DIR/scripts/claude-persona-refresh.sh" \
+        || echo -e "  ${YELLOW}persona refresh exited non-zero — continuing setup${NC}"
+elif [ -f "$HOME/claude-persona-refresh.sh" ]; then
+    bash "$HOME/claude-persona-refresh.sh" \
+        || echo -e "  ${YELLOW}persona refresh exited non-zero — continuing setup${NC}"
+else
+    echo -e "  ${YELLOW}claude-persona-refresh.sh not found locally — skipping${NC}"
+    echo -e "  ${CYAN}To refresh manually: copy scripts/claude-persona-refresh.sh from the Surface and run it.${NC}"
 fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────

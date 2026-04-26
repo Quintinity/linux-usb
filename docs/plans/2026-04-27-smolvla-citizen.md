@@ -2779,6 +2779,20 @@ sudo systemctl daemon-reload
 sudo systemctl enable citizenry-jetson.service
 echo -e "${GREEN}citizenry-jetson.service installed and enabled${NC}"
 echo -e "${CYAN}Logs: journalctl -u citizenry-jetson -f${NC}"
+
+# 4. Refresh Claude device persona (writes ~/CLAUDE.md + memory file
+#    describing this Jetson's PolicyNode role, services, hardware survey).
+#    Mirrors pi-setup.sh's step 11. Idempotent.
+SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd || echo "$HOME/linux-usb")"
+if [ -f "$SCRIPT_DIR/scripts/claude-persona-refresh.sh" ]; then
+    bash "$SCRIPT_DIR/scripts/claude-persona-refresh.sh" \
+        || echo -e "${YELLOW}persona refresh exited non-zero — continuing${NC}"
+elif [ -f "$HOME/claude-persona-refresh.sh" ]; then
+    bash "$HOME/claude-persona-refresh.sh" \
+        || echo -e "${YELLOW}persona refresh exited non-zero — continuing${NC}"
+else
+    echo -e "${YELLOW}claude-persona-refresh.sh not found locally — skipping${NC}"
+fi
 ```
 
 Make executable: `chmod +x jetson-setup.sh`.
