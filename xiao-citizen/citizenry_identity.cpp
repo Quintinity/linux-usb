@@ -1,6 +1,12 @@
 // linux-usb/xiao-citizen/citizenry_identity.cpp
 #include "citizenry_identity.h"
-#include "tests/vendor/Crypto/Ed25519.h"
+#ifdef ARDUINO_HOST_TEST
+  // Host-only test build pulls the vendored rweather/Crypto sources.
+  #include "tests/vendor/Crypto/Ed25519.h"
+#else
+  // Arduino build uses the installed rweather Crypto library.
+  #include <Ed25519.h>
+#endif
 #include <cstdio>
 #include <cstring>
 
@@ -49,3 +55,25 @@ bool Identity::verify_hex(const std::string& pubkey_hex,
     from_hex(sig_hex, sig, 64);
     return Ed25519::verify(sig, pub, msg.data(), msg.size());
 }
+
+#ifndef ARDUINO_HOST_TEST
+#include <Preferences.h>
+
+bool Identity::load_from_nvs() {
+    Preferences prefs;
+    if (!prefs.begin("xiao-citizen", true)) return false;
+    size_t got = prefs.getBytes("priv", priv_, 32);
+    prefs.end();
+    if (got != 32) return false;
+    Ed25519::derivePublicKey(pub_, priv_);
+    return true;
+}
+
+void Identity::save_to_nvs() const {
+    Preferences prefs;
+    prefs.begin("xiao-citizen", false);
+    prefs.putBytes("priv", priv_, 32);
+    prefs.end();
+}
+#endif
+
