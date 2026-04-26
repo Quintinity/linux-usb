@@ -10,12 +10,17 @@ import asyncio
 import signal
 
 from .surface_citizen import SurfaceCitizen
+from .survey import survey_hardware
 
 
 async def main(args):
+    hw = await survey_hardware()
+    print(f"[survey] cameras={len(hw.cameras)} accelerators={len(hw.accelerators)} "
+          f"servo_buses={len(hw.servo_buses)} cpu={hw.compute.cpu_model}")
     citizen = SurfaceCitizen(
         leader_port=args.leader_port,
         teleop_fps=args.fps,
+        hardware=hw,
     )
 
     loop = asyncio.get_event_loop()

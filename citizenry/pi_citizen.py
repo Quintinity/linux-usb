@@ -14,6 +14,7 @@ from .protocol import MessageType, make_envelope
 from .marketplace import compute_bid_score, Task
 from .skills import default_manipulator_skills
 from .mycelium import Warning, Severity
+from .survey import HardwareMap, merge_capabilities
 
 MOTOR_NAMES = [
     "shoulder_pan", "shoulder_lift", "elbow_flex",
@@ -36,12 +37,15 @@ class PiCitizen(Citizen):
         self,
         follower_port: str = "/dev/ttyACM0",
         telemetry_hz: float = 2.0,
+        hardware: HardwareMap | None = None,
     ):
+        base_caps = ["6dof_arm", "gripper", "feetech_sts3215"]
         super().__init__(
             name="pi-follower",
             citizen_type="manipulator",
-            capabilities=["6dof_arm", "gripper", "feetech_sts3215"],
+            capabilities=merge_capabilities(base_caps, hardware),
         )
+        self.hardware = hardware
         self.follower_port = follower_port
         self.telemetry_hz = telemetry_hz
         self._follower_bus = None
