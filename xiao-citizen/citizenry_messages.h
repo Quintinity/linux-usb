@@ -39,5 +39,29 @@ std::string build_discover(const Identity& id,
                            uint16_t unicast_port,
                            double now_unix_secs);
 
-// (2.3 HEARTBEAT, 2.4 ADVERTISE, 2.6 REPORT govern_ack are added in the
-//  subsequent commits in this branch.)
+// 2.3: HEARTBEAT (broadcast). Body: {name, state, health, unicast_port, uptime}.
+// Default cadence in the firmware loop is one beat per 2 s — see
+// HeartbeatScheduler below for the pacing helper.
+std::string build_heartbeat(const Identity& id,
+                            const std::string& citizen_name,
+                            uint16_t unicast_port,
+                            double uptime_secs,
+                            double now_unix_secs);
+
+// Pure-logic 2 s cadence ticker. tick(now_ms) returns true iff a heartbeat
+// is due at this tick (every 2000 ms after the first call). Lives outside
+// the transport layer so it can be unit-tested with a synthetic clock.
+class HeartbeatScheduler {
+public:
+    explicit HeartbeatScheduler(uint32_t period_ms = 2000) : _period_ms(period_ms) {}
+    bool tick(uint32_t now_ms);     // returns true on each "beat now" boundary
+    uint32_t period_ms() const { return _period_ms; }
+
+private:
+    uint32_t _period_ms;
+    uint32_t _last_beat_ms = 0;
+    bool     _started = false;
+};
+
+// (2.4 ADVERTISE and 2.6 REPORT govern_ack are added in the subsequent
+//  commits in this branch.)
