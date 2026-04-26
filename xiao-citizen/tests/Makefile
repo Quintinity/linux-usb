@@ -2,14 +2,13 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -I..
 
-# Phase 0 tests. test_envelope_codec is a Phase 1 deliverable and is added
-# back to TESTS once the codec round-trip work begins.
-TESTS = test_canonical_json test_ed25519_interop
+# Phase 0 tests + Phase 2 dispatcher.
+TESTS = test_canonical_json test_ed25519_interop test_dispatch
 
 all: $(TESTS)
 
 test_canonical_json: test_canonical_json.cpp ../citizenry_envelope.cpp
-	$(CXX) $(CXXFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) -DARDUINO_HOST_TEST -Ivendor -o $@ $^
 
 # test_ed25519_interop links rweather/Crypto Ed25519 (vendored).
 # We exclude RNG.cpp and NoiseSource.cpp (they pull in Arduino-only deps
@@ -37,3 +36,8 @@ clean:
 	rm -f $(TESTS) *.o
 
 .PHONY: all run clean
+
+# Phase 2.1 dispatcher test. Pulls citizenry_envelope (now with envelope_to_wire / from_wire)
+# and citizenry_dispatch.cpp; reuses the rweather/Crypto sources from the Ed25519 test.
+test_dispatch: test_dispatch.cpp ../citizenry_envelope.cpp ../citizenry_identity.cpp ../citizenry_dispatch.cpp $(CRYPTO_SRCS)
+	$(CXX) $(CXXFLAGS) -DARDUINO_HOST_TEST -Ivendor -Ivendor/Crypto -o $@ $^
