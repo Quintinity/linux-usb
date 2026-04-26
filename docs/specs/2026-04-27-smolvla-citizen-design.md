@@ -196,19 +196,14 @@ Bradley triggers a marketplace task via `governor_cli` (e.g. "pick the red block
 - End-to-end action latency budget: < 100ms (`TTL_TELEOP` in `protocol.py:40`). Components: camera frame age (<33ms at 30 FPS) + LAN transit (<10ms) + Jetson inference (target <50ms) + Pi servo write (<5ms).
 - If sustained 30 Hz isn't reachable, fall back to lower-Hz action-chunk emission with chunk size K covering the gap. This is already SmolVLA's native pattern.
 
-## 12. Decisions and remaining open questions
-
-### Decided 2026-04-27
+## 12. Decisions (all closed 2026-04-27)
 
 1. ✅ **Camera selection** — all three on-fleet cameras remain available; PolicyCitizen picks 2 at runtime via Constitution Law `policy_citizen.observation_cameras`. See §7.1 for the full mechanism.
 2. ✅ **Skill granularity** — single `imitation:smolvla_base` skill in v1; refine into per-task skills (`pick_and_place_smolvla`, `pour_smolvla`, …) post-fine-tune, once we have evidence that performance differs meaningfully across task types.
 3. ✅ **Constitution amendment** — add a new immutable Article: "Policy citizens shall not emit action targets outside ServoLimits." Defence-in-depth: Pi already enforces this on ingress, but codifying it in the Constitution gives the immune-memory subsystem a clean event class to learn from and makes governance auditable.
-
-### Still open
-
-4. **Personality seed.** Default proposed: high Conscientiousness, low Neuroticism, mid Openness, mid Extraversion ("teacher" archetype). Confirm or pick a different archetype.
-5. **Surface fallback policy.** Out of scope for this spec, but the design leaves a hook (marketplace re-auction). Confirm we're OK leaving the Surface as a teleop-only fallback (i.e. no second policy citizen on the Surface) for now.
-6. **Naming.** `PolicyCitizen` vs `SmolVLACitizen`. Recommend: `PolicyCitizen`, with `imitation:smolvla_base` as a skill, so future variants (Octo, π0.5-distilled, fine-tunes) drop into the same class.
+4. ✅ **Personality seed** — "teacher" archetype: high Conscientiousness, low Neuroticism, mid Openness, mid Extraversion. Stored in `genome.json` at first boot; mutates per the existing personality drift mechanism.
+5. ✅ **Surface fallback policy** — Surface stays teleop-only for v1. No second policy citizen on the Surface. Marketplace re-auction is the failure hook; if PolicyCitizen drops, Bradley's leader-arm teleop wins by default.
+6. ✅ **Class naming** — `PolicyCitizen`, with `imitation:smolvla_base` as a skill. Future variants (Octo, π0.5-distilled, local fine-tunes) drop into the same class as additional skills.
 
 ## 13. Suggested implementation order
 
