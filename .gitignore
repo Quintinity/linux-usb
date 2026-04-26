@@ -4,3 +4,10 @@ __pycache__/
 *.pyc
 .coverage
 .pytest_cache/
+
+# xiao-citizen host-compiled test binaries (built locally via make)
+xiao-citizen/tests/test_canonical_json
+xiao-citizen/tests/test_ed25519_interop
+xiao-citizen/tests/test_dispatch
+xiao-citizen/tests/test_messages
+xiao-citizen/tests/emit_envelope
