@@ -70,7 +70,7 @@ This keeps the change additive — no Pi-side modifications required for the inf
 | `citizenry/episode_recorder.py` | **modified** | Adds `EpisodeRecorderV3` writer; existing v1 writer kept behind a Constitution flag for one transition window |
 | `citizenry/skills.py` | **modified** | Adds `default_policy_skills()` factory |
 | `citizenry/genome.py` | **no change** | Already supports custom `role` and `hardware_type` strings |
-| `citizenry/constitution.py` | **modified** | Adds Article: "Policy citizens shall not emit action targets outside ServoLimits"; adds Law `episode_recorder_format = "v3"` |
+| `citizenry/constitution.py` | **modified** | Adds Article: "Policy citizens shall not emit action targets outside ServoLimits"; adds Laws `episode_recorder_format = "v3"` and `policy_citizen.observation_cameras = [...]` |
 | `citizenry/marketplace.py` | **no change** | Already protocol-agnostic re: who bids |
 | `pi-setup.sh` / new `jetson-setup.sh` | **new** | Provisioning + systemd unit `citizenry-jetson.service` |
 
@@ -108,6 +108,21 @@ SmolVLA `lerobot/smolvla_base` is pretrained on Hugging Face's SO-100/101 commun
 - **Action units:** SmolVLA's checkpoint outputs (likely normalized [-1, 1] or radians); citizenry's `action_positions` are raw Feetech servo ticks (0–4095). The runner is responsible for the inverse mapping.
 
 Mapping lives in `smolvla_runner.py` so policy_citizen stays unaware of it. If the contract turns out not to match, the runner is the only file that has to change.
+
+### 7.1 Runtime camera selection (decided 2026-04-27)
+
+All three on-fleet cameras (Pi CSI NoIR Wide, two XIAO wifi cams) remain available as observation sources at all times. PolicyCitizen picks **which two** to consume at runtime based on a Constitution Law:
+
+```python
+# in constitution.py default_laws()
+"policy_citizen.observation_cameras": ["xiao-cam-wrist", "pi-csi-base"]  # ordered: [primary, secondary]
+```
+
+Camera identity is resolved by mDNS-advertised name (e.g. `xiao-cam-a1b2`) or by a `role` tag in the camera-citizen's genome (e.g. `wrist`, `base`, `ceiling`). PolicyCitizen subscribes to the two named camera-citizens via the existing ADVERTISE/PROPOSE pattern and assembles the SmolVLA observation in `smolvla_runner.py`.
+
+**Switching cameras at runtime:** Governor issues a `GOVERN` message with an updated Law. PolicyCitizen detects the change on its next constitution refresh, drops its current camera subscriptions, subscribes to the new pair, and continues without restart. No code change to swap; no re-deployment.
+
+**Implication for components:** `policy_citizen.py` keeps a small `ObservationAssembler` that holds the active subscription list; `smolvla_runner.py` is told which slot is `[primary, secondary]` and packages them into the model's expected channel order. If the Law names a camera that isn't on the network, PolicyCitizen REPORTs `camera_unresolved`, refuses to bid, and waits for either the camera to come online or a new GOVERN.
 
 ## 8. Dataset v3 migration
 
@@ -181,14 +196,19 @@ Bradley triggers a marketplace task via `governor_cli` (e.g. "pick the red block
 - End-to-end action latency budget: < 100ms (`TTL_TELEOP` in `protocol.py:40`). Components: camera frame age (<33ms at 30 FPS) + LAN transit (<10ms) + Jetson inference (target <50ms) + Pi servo write (<5ms).
 - If sustained 30 Hz isn't reachable, fall back to lower-Hz action-chunk emission with chunk size K covering the gap. This is already SmolVLA's native pattern.
 
-## 12. Open questions to resolve before implementation starts
+## 12. Decisions and remaining open questions
 
-1. **Camera selection.** SO-100/101 community pretraining used wrist + base. The fleet currently has Pi CSI cam (NoIR Wide) + 2 XIAO wifi cams. Which two go to SmolVLA? Likely: one XIAO mounted as wrist, Pi CSI as base. Confirm before writing the runner's observation assembler.
-2. **Skill granularity.** Start with one generic `imitation:smolvla_base` skill, or split per task type (`pick_and_place`, `pour`, …)? Recommendation: single skill in v1; refine post-fine-tune.
-3. **Constitution amendment.** Should we add a new immutable Article ("Policy citizens shall not emit actions outside ServoLimits") even though the Pi already enforces this? Recommendation: yes — codifying makes governance auditable and gives the immune-memory subsystem a clean event class to learn from.
-4. **Personality seed.** OCEAN profile defaults to "teacher" archetype (high C, low N). Confirm this is the desired starting point or pick a different archetype.
-5. **Surface fallback policy.** Out of scope for this spec, but the design leaves a hook: marketplace re-auction. Just confirm we're OK leaving the Surface as a teleop-only fallback (i.e. no second policy citizen on the Surface) for now.
-6. **Naming.** PolicyCitizen vs SmolVLACitizen. Recommend: PolicyCitizen, with `imitation:smolvla_base` as a skill, so future variants (Octo, π0.5-distilled) drop into the same class.
+### Decided 2026-04-27
+
+1. ✅ **Camera selection** — all three on-fleet cameras remain available; PolicyCitizen picks 2 at runtime via Constitution Law `policy_citizen.observation_cameras`. See §7.1 for the full mechanism.
+2. ✅ **Skill granularity** — single `imitation:smolvla_base` skill in v1; refine into per-task skills (`pick_and_place_smolvla`, `pour_smolvla`, …) post-fine-tune, once we have evidence that performance differs meaningfully across task types.
+3. ✅ **Constitution amendment** — add a new immutable Article: "Policy citizens shall not emit action targets outside ServoLimits." Defence-in-depth: Pi already enforces this on ingress, but codifying it in the Constitution gives the immune-memory subsystem a clean event class to learn from and makes governance auditable.
+
+### Still open
+
+4. **Personality seed.** Default proposed: high Conscientiousness, low Neuroticism, mid Openness, mid Extraversion ("teacher" archetype). Confirm or pick a different archetype.
+5. **Surface fallback policy.** Out of scope for this spec, but the design leaves a hook (marketplace re-auction). Confirm we're OK leaving the Surface as a teleop-only fallback (i.e. no second policy citizen on the Surface) for now.
+6. **Naming.** `PolicyCitizen` vs `SmolVLACitizen`. Recommend: `PolicyCitizen`, with `imitation:smolvla_base` as a skill, so future variants (Octo, π0.5-distilled, fine-tunes) drop into the same class.
 
 ## 13. Suggested implementation order
 
