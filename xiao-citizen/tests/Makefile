@@ -2,8 +2,8 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -I..
 
-# Phase 0 tests + Phase 2 dispatcher.
-TESTS = test_canonical_json test_ed25519_interop test_dispatch
+# Phase 0 tests + Phase 2 dispatcher + message builders.
+TESTS = test_canonical_json test_ed25519_interop test_dispatch test_messages
 
 all: $(TESTS)
 
@@ -40,4 +40,9 @@ clean:
 # Phase 2.1 dispatcher test. Pulls citizenry_envelope (now with envelope_to_wire / from_wire)
 # and citizenry_dispatch.cpp; reuses the rweather/Crypto sources from the Ed25519 test.
 test_dispatch: test_dispatch.cpp ../citizenry_envelope.cpp ../citizenry_identity.cpp ../citizenry_dispatch.cpp $(CRYPTO_SRCS)
+	$(CXX) $(CXXFLAGS) -DARDUINO_HOST_TEST -Ivendor -Ivendor/Crypto -o $@ $^
+
+# Phase 2.2-2.4 + 2.6 message-builder tests. Round-trips every builder
+# through the dispatcher to confirm shape and signature.
+test_messages: test_messages.cpp ../citizenry_envelope.cpp ../citizenry_identity.cpp ../citizenry_dispatch.cpp ../citizenry_messages.cpp $(CRYPTO_SRCS)
 	$(CXX) $(CXXFLAGS) -DARDUINO_HOST_TEST -Ivendor -Ivendor/Crypto -o $@ $^
