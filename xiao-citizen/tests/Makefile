@@ -2,8 +2,8 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -I..
 
-# Phase 0 tests + Phase 2 dispatcher + message builders.
-TESTS = test_canonical_json test_ed25519_interop test_dispatch test_messages
+# Phase 0 tests + Phase 2 dispatcher + message builders + neighbor table.
+TESTS = test_canonical_json test_ed25519_interop test_dispatch test_messages test_neighbor
 
 all: $(TESTS)
 
@@ -46,3 +46,7 @@ test_dispatch: test_dispatch.cpp ../citizenry_envelope.cpp ../citizenry_identity
 # through the dispatcher to confirm shape and signature.
 test_messages: test_messages.cpp ../citizenry_envelope.cpp ../citizenry_identity.cpp ../citizenry_dispatch.cpp ../citizenry_messages.cpp $(CRYPTO_SRCS)
 	$(CXX) $(CXXFLAGS) -DARDUINO_HOST_TEST -Ivendor -Ivendor/Crypto -o $@ $^
+
+# Phase 2.5 neighbor table — pure logic, no Crypto/json deps.
+test_neighbor: test_neighbor.cpp ../citizenry_neighbor.cpp
+	$(CXX) $(CXXFLAGS) -DARDUINO_HOST_TEST -o $@ $^
