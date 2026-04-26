@@ -12,7 +12,10 @@
 #include "esp_camera.h"
 #include "board_config.h"
 #include "camera_pins.h"
+#include "citizenry_constitution_store.h"
+#include "citizenry_dispatch.h"
 #include "citizenry_identity.h"
+#include "citizenry_messages.h"
 #include "citizenry_transport.h"
 
 // ===== build-time configuration =====
@@ -39,9 +42,16 @@ static uint16_t make_unicast_port() {
     return 50000u + (low % 15000u);
 }
 
-static Identity            g_identity;
-static String              g_name;
-static CitizenryTransport  g_xport;
+static Identity                       g_identity;
+static String                         g_name;
+static CitizenryTransport             g_xport;
+static Dispatcher                     g_dispatcher;
+static PreferencesConstitutionStore   g_constitution;
+// The reply port we ask the governor to use for the ack envelope. UDP is
+// connectionless so the governor will actually reply to the *source* port
+// of our outbound REPORT (i.e. our unicast socket); we still set this so
+// the body shape matches the protocol.
+static uint16_t                       g_unicast_port = 0;
 
 void setup() {
     Serial.begin(115200);
@@ -74,9 +84,45 @@ void setup() {
     // Transport — UDP multicast group + per-device unicast socket on a
     // MAC-derived port (announced via mDNS TXT in Task 1.3).
     uint16_t ucast_port = make_unicast_port();
-    bool xport_ok = g_xport.begin([](const std::string& bytes, IPAddress ip, uint16_t port) {
-        Serial.printf("[recv %u bytes from %s:%u]\n",
-                      (unsigned)bytes.size(), ip.toString().c_str(), port);
+    g_unicast_port = ucast_port;
+
+    // Dispatcher: the single inbound handler. Per-type routing happens here
+    // — Phase 2 currently routes only GOVERN (Task 2.6); Phase 3 will add
+    // PROPOSE. Other types (HEARTBEAT/ADVERTISE/DISCOVER) are observed but
+    // not yet acted upon by the firmware.
+    g_dispatcher.set_handler([](const InboundEnvelope& m) {
+        switch (m.type) {
+            case MsgType::GOVERN: {
+                GovernAckTarget tgt;
+                std::string ack = handle_govern(m, g_identity, g_constitution,
+                                                g_unicast_port,
+                                                (double)time(nullptr), tgt);
+                if (ack.empty()) {
+                    Serial.println("[govern] rejected (bad shape or save failed)");
+                    return;
+                }
+                // Phase 2 firmware doesn't yet have the governor's source IP
+                // wired through the dispatcher, so we broadcast the ack.
+                // The governor accepts unicast replies on its own multicast
+                // listener too — see citizenry/protocol.py recipient handling.
+                g_xport.send_multicast(ack);
+                Serial.printf("[govern] ack sent v=%d\n", tgt.constitution_version);
+                break;
+            }
+            default:
+                Serial.printf("[recv envelope type=%d]\n", m.type);
+                break;
+        }
+    });
+
+    bool xport_ok = g_xport.begin([](const std::string& bytes, IPAddress /*ip*/, uint16_t /*port*/) {
+        // Drop everything into the dispatcher; it parses, verifies, and
+        // routes. The per-message logging happens inside the type switch.
+        g_dispatcher.set_now((double)time(nullptr));
+        DispatchResult r = g_dispatcher.deliver(bytes);
+        if (r != DispatchResult::Delivered) {
+            Serial.printf("[drop %s]\n", dispatch_result_name(r));
+        }
     }, ucast_port);
     if (xport_ok) {
         Serial.printf("transport ready, unicast=:%u\n", g_xport.unicast_port());

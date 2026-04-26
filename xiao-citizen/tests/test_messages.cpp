@@ -215,7 +215,206 @@ int main() {
               !advertise_target_for_discover(captured, 0, t));
     }
 
-    // (2.6 REPORT cases append below as those builders land.)
+    // ---- 2.6: build_report_govern_ack (unicast to governor) ----
+    {
+        const std::string GOVERNOR = std::string(64, 'a');
+        std::string wire = build_report_govern_ack(id, /*version=*/3, GOVERNOR, NOW);
+        check("govern_ack non-empty", !wire.empty());
+
+        InboundEnvelope captured;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ captured = m; });
+        check("govern_ack delivered", disp.deliver(wire) == DispatchResult::Delivered);
+        check("govern_ack type=6 (REPORT)", captured.type == 6);
+        check("govern_ack sender == us",   captured.sender == id.pubkey_hex());
+        check("govern_ack recipient=gov",  captured.recipient == GOVERNOR);
+        check("govern_ack body.task=govern_ack",
+              body_str(captured.body, "task") == "govern_ack");
+        check("govern_ack body.result=success",
+              body_str(captured.body, "result") == "success");
+        check("govern_ack body.constitution_version=3",
+              body_int(captured.body, "constitution_version") == 3);
+    }
+
+    // ---- 2.6: handle_govern happy path — receive GOVERN, persist, return ACK ----
+    {
+        // The governor is a different identity. We simulate the inbound by
+        // building a GOVERN envelope on its behalf, delivering it through the
+        // dispatcher (so signature verifies), capturing the InboundEnvelope,
+        // then handing it to handle_govern.
+        Identity governor;
+        governor.from_seed(hex_decode(
+            "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"));
+
+        Envelope gov_env;
+        gov_env.version   = 1;
+        gov_env.type      = MsgType::GOVERN;
+        gov_env.sender    = governor.pubkey_hex();
+        gov_env.recipient = id.pubkey_hex();
+        gov_env.timestamp = NOW;
+        gov_env.ttl       = 3600.0;
+        gov_env.body_set_string("type", "constitution");
+        // Nested constitution body (matches Python's send_govern(...) shape).
+        JsonValue cons; cons.kind = JsonValue::Object;
+        JsonValue v_ver; v_ver.kind = JsonValue::Int; v_ver.i = 7;
+        cons.o["version"] = v_ver;
+        JsonValue v_articles; v_articles.kind = JsonValue::Array;
+        cons.o["articles"] = v_articles;
+        gov_env.body["constitution"] = cons;
+        gov_env.signature = governor.sign_hex(canonical_signable_bytes(gov_env));
+        std::string wire = envelope_to_wire(gov_env);
+
+        InboundEnvelope inbound;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ inbound = m; });
+        check("govern: setup delivered", disp.deliver(wire) == DispatchResult::Delivered);
+        check("govern: setup type=7", inbound.type == 7);
+
+        InMemoryConstitutionStore store;
+        GovernAckTarget tgt;
+        std::string ack_wire = handle_govern(inbound, id, store,
+                                             /*fallback_reply_port=*/4242,
+                                             NOW, tgt);
+        check("govern: ack non-empty",         !ack_wire.empty());
+        check("govern: store populated",        store.has());
+        // Persistence carries through.
+        int sv = 0; std::string sb;
+        check("govern: store.load ok",          store.load(sv, sb));
+        check("govern: persisted version=7",    sv == 7);
+        check("govern: persisted body non-empty", !sb.empty());
+        // Target is filled.
+        check("govern: target recipient = governor",
+              tgt.recipient_pubkey_hex == governor.pubkey_hex());
+        check("govern: target reply_port = fallback",
+              tgt.reply_port == 4242);
+        check("govern: target version=7",        tgt.constitution_version == 7);
+
+        // The returned wire bytes must dispatch as a valid REPORT govern_ack.
+        InboundEnvelope ack;
+        Dispatcher d2;
+        d2.set_now(NOW);
+        d2.set_handler([&](const InboundEnvelope& m){ ack = m; });
+        check("govern: ack delivered",          d2.deliver(ack_wire) == DispatchResult::Delivered);
+        check("govern: ack type=6",             ack.type == 6);
+        check("govern: ack sender == us",       ack.sender == id.pubkey_hex());
+        check("govern: ack recipient = gov",    ack.recipient == governor.pubkey_hex());
+        check("govern: ack body.task",          body_str(ack.body, "task") == "govern_ack");
+        check("govern: ack body.result",        body_str(ack.body, "result") == "success");
+        check("govern: ack body.version=7",
+              body_int(ack.body, "constitution_version") == 7);
+    }
+
+    // ---- 2.6: handle_govern accepts top-level body.version (sketch fallback) ----
+    {
+        // Some early Phase 2 governors may send a flatter body that places
+        // `version` at the top level. The handler must still accept it.
+        Identity governor;
+        governor.from_seed(hex_decode(
+            "1111111111111111111111111111111111111111111111111111111111111111"));
+        Envelope gov_env;
+        gov_env.version   = 1;
+        gov_env.type      = MsgType::GOVERN;
+        gov_env.sender    = governor.pubkey_hex();
+        gov_env.recipient = id.pubkey_hex();
+        gov_env.timestamp = NOW;
+        gov_env.ttl       = 3600.0;
+        gov_env.body_set_int("version", 2);
+        gov_env.body_set_string("note", "flat-shape");
+        gov_env.signature = governor.sign_hex(canonical_signable_bytes(gov_env));
+
+        InboundEnvelope inbound;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ inbound = m; });
+        disp.deliver(envelope_to_wire(gov_env));
+
+        InMemoryConstitutionStore store;
+        GovernAckTarget tgt;
+        std::string ack = handle_govern(inbound, id, store, 1234, NOW, tgt);
+        check("govern flat: ack non-empty", !ack.empty());
+        check("govern flat: version=2",     tgt.constitution_version == 2);
+    }
+
+    // ---- 2.6: handle_govern rejects wrong message type ----
+    {
+        std::string wire = build_heartbeat(id, NAME, PORT, 1.0, NOW);
+        InboundEnvelope captured;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ captured = m; });
+        disp.deliver(wire);
+
+        InMemoryConstitutionStore store;
+        GovernAckTarget tgt;
+        std::string ack = handle_govern(captured, id, store, 1234, NOW, tgt);
+        check("govern: rejects HEARTBEAT (returns empty)", ack.empty());
+        check("govern: rejected → store untouched",        !store.has());
+        check("govern: rejected → no recipient set",        tgt.recipient_pubkey_hex.empty());
+    }
+
+    // ---- 2.6: handle_govern rejects missing version ----
+    {
+        Identity governor;
+        governor.from_seed(hex_decode(
+            "2222222222222222222222222222222222222222222222222222222222222222"));
+        Envelope gov_env;
+        gov_env.version   = 1;
+        gov_env.type      = MsgType::GOVERN;
+        gov_env.sender    = governor.pubkey_hex();
+        gov_env.recipient = id.pubkey_hex();
+        gov_env.timestamp = NOW;
+        gov_env.ttl       = 3600.0;
+        gov_env.body_set_string("type", "constitution");
+        // No constitution.version anywhere — body has only `type`.
+        gov_env.signature = governor.sign_hex(canonical_signable_bytes(gov_env));
+
+        InboundEnvelope inbound;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ inbound = m; });
+        disp.deliver(envelope_to_wire(gov_env));
+
+        InMemoryConstitutionStore store;
+        GovernAckTarget tgt;
+        std::string ack = handle_govern(inbound, id, store, 1234, NOW, tgt);
+        check("govern: missing version rejected", ack.empty());
+        check("govern: missing version → store untouched", !store.has());
+    }
+
+    // ---- 2.6: handle_govern rejects invalid version kind (string) ----
+    {
+        Identity governor;
+        governor.from_seed(hex_decode(
+            "3333333333333333333333333333333333333333333333333333333333333333"));
+        Envelope gov_env;
+        gov_env.version   = 1;
+        gov_env.type      = MsgType::GOVERN;
+        gov_env.sender    = governor.pubkey_hex();
+        gov_env.recipient = id.pubkey_hex();
+        gov_env.timestamp = NOW;
+        gov_env.ttl       = 3600.0;
+        gov_env.body_set_string("type", "constitution");
+        // Constitution with version as a STRING — must be refused.
+        JsonValue cons; cons.kind = JsonValue::Object;
+        JsonValue v_ver; v_ver.kind = JsonValue::String; v_ver.s = "v1";
+        cons.o["version"] = v_ver;
+        gov_env.body["constitution"] = cons;
+        gov_env.signature = governor.sign_hex(canonical_signable_bytes(gov_env));
+
+        InboundEnvelope inbound;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ inbound = m; });
+        disp.deliver(envelope_to_wire(gov_env));
+
+        InMemoryConstitutionStore store;
+        GovernAckTarget tgt;
+        std::string ack = handle_govern(inbound, id, store, 1234, NOW, tgt);
+        check("govern: string version rejected", ack.empty());
+        check("govern: string version → store untouched", !store.has());
+    }
 
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

@@ -89,4 +89,65 @@ bool advertise_target_for_discover(const InboundEnvelope& m,
                                    uint16_t fallback_port,
                                    AdvertiseTarget& out);
 
-// (2.6 REPORT govern_ack added in the subsequent commit in this branch.)
+// 2.6: REPORT govern_ack (unicast to governor). Body: {task:"govern_ack",
+// result:"success", constitution_version}.
+std::string build_report_govern_ack(const Identity& id,
+                                    int constitution_version,
+                                    const std::string& governor_pubkey_hex,
+                                    double now_unix_secs);
+
+// 2.6: persistence interface for the constitution (the GOVERN body). Hardware
+// implementation is NVS-backed (Preferences); the host tests use an in-memory
+// shim. The interface is intentionally tiny — store the version number, the
+// raw signable_bytes-canonical body (so future code can re-verify a
+// re-broadcast GOVERN against the cached signature), and a have-we-got-one
+// flag for the ADVERTISE body.
+class ConstitutionStore {
+public:
+    virtual ~ConstitutionStore() = default;
+    virtual bool save(int version, const std::string& canonical_body) = 0;
+    virtual bool load(int& version, std::string& canonical_body) = 0;
+    virtual bool has() const = 0;
+};
+
+// In-memory shim for host tests. Not used in firmware; the sketch wires
+// Preferences directly behind the same interface.
+class InMemoryConstitutionStore : public ConstitutionStore {
+public:
+    bool save(int version, const std::string& canonical_body) override {
+        _version = version;
+        _body = canonical_body;
+        _has = true;
+        return true;
+    }
+    bool load(int& version, std::string& canonical_body) override {
+        if (!_has) return false;
+        version = _version;
+        canonical_body = _body;
+        return true;
+    }
+    bool has() const override { return _has; }
+
+private:
+    int _version = 0;
+    std::string _body;
+    bool _has = false;
+};
+
+// 2.6: pure-logic GOVERN handler. Given an inbound GOVERN, persist its body
+// to `store`, then build a REPORT govern_ack signed by `id` and addressed
+// to the governor (the GOVERN's sender). Returns the wire bytes for the
+// REPORT, plus the recipient pubkey + reply port via out-params so the
+// firmware can transport.send_unicast(). Returns empty string on rejection
+// (wrong type, missing version, save failure).
+struct GovernAckTarget {
+    std::string recipient_pubkey_hex;
+    uint16_t    reply_port = 0;
+    int         constitution_version = 0;
+};
+std::string handle_govern(const InboundEnvelope& m,
+                          const Identity& id,
+                          ConstitutionStore& store,
+                          uint16_t fallback_reply_port,
+                          double now_unix_secs,
+                          GovernAckTarget& out);

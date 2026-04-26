@@ -14,6 +14,7 @@ namespace {
 constexpr double TTL_HEARTBEAT = 6.0;
 constexpr double TTL_DISCOVER  = 5.0;
 constexpr double TTL_ADVERTISE = 30.0;
+constexpr double TTL_REPORT    = 60.0;
 
 // Sign env in place, return wire bytes.
 std::string finalize(const Identity& id, Envelope& env) {
@@ -128,4 +129,90 @@ bool advertise_target_for_discover(const InboundEnvelope& m,
     return true;
 }
 
-// build_report_govern_ack (2.6) added later.
+std::string build_report_govern_ack(const Identity& id,
+                                    int constitution_version,
+                                    const std::string& governor_pubkey_hex,
+                                    double now_unix_secs) {
+    Envelope env;
+    env.version   = 1;
+    env.type      = MsgType::REPORT;
+    env.sender    = id.pubkey_hex();
+    env.recipient = governor_pubkey_hex;
+    env.timestamp = now_unix_secs;
+    env.ttl       = TTL_REPORT;
+    env.body_set_string("task", "govern_ack");
+    env.body_set_string("result", "success");
+    env.body_set_int("constitution_version", constitution_version);
+    return finalize(id, env);
+}
+
+// Re-emit a sub-tree of the body in canonical form so we cache the exact bytes
+// that signed the GOVERN. This isn't a perfect serialization (it doesn't
+// include the envelope wrapper, only the inner body) but it's deterministic
+// and stable enough for the v1 store format. Phase 4 may upgrade to keeping
+// the full canonical_signable_bytes + signature pair instead.
+namespace {
+std::string canonical_body_only(const JsonObject& body) {
+    Envelope tmp;
+    tmp.version = 0; tmp.type = 0; tmp.sender = ""; tmp.recipient = "";
+    tmp.timestamp = 0.0; tmp.ttl = 0.0;
+    tmp.body = body;
+    // Strip back to just the body's canonical map. canonical_signable_bytes
+    // emits the full envelope; we slice the body sub-string out by simply
+    // re-canonicalising the body itself via a fresh envelope-with-empty-
+    // outer-fields and grabbing its '"body":<stuff>' substring. Cheaper:
+    // run write_canonical against the body directly. We re-use envelope
+    // canonicalisation indirectly here — a future commit may expose
+    // canonical_object_bytes() publicly.
+    std::string full = canonical_signable_bytes(tmp);
+    auto pos = full.find("\"body\":");
+    if (pos == std::string::npos) return "";
+    return full.substr(pos + 7);   // after "body":
+}
+} // anon
+
+std::string handle_govern(const InboundEnvelope& m,
+                          const Identity& id,
+                          ConstitutionStore& store,
+                          uint16_t fallback_reply_port,
+                          double now_unix_secs,
+                          GovernAckTarget& out) {
+    out.recipient_pubkey_hex.clear();
+    out.reply_port = 0;
+    out.constitution_version = 0;
+    if (m.type != MsgType::GOVERN) return "";
+    if (m.sender.empty()) return "";
+    // The Python governor (surface_citizen) sends GOVERN with body shape
+    //   {type:"constitution", constitution:{version:N, articles:[...], ...}}
+    // so the version lives one level down. Older test governors that wrap
+    // the constitution flat in the body (just {version:N, note:...}) are
+    // also accepted as a backwards-compat shortcut.
+    int version = 0;
+    bool found = false;
+    auto cit = m.body.find("constitution");
+    if (cit != m.body.end() && cit->second.kind == JsonValue::Object) {
+        auto vit = cit->second.o.find("version");
+        if (vit != cit->second.o.end() && vit->second.kind == JsonValue::Int) {
+            version = (int)vit->second.i;
+            found = true;
+        }
+    }
+    if (!found) {
+        auto vit = m.body.find("version");
+        if (vit != m.body.end() && vit->second.kind == JsonValue::Int) {
+            version = (int)vit->second.i;
+            found = true;
+        }
+    }
+    if (!found) {
+        // GOVERN with no resolvable version is malformed enough to refuse.
+        return "";
+    }
+    std::string canonical = canonical_body_only(m.body);
+    if (!store.save(version, canonical)) return "";
+
+    out.recipient_pubkey_hex = m.sender;
+    out.reply_port = fallback_reply_port;   // governor's reply port from sketch state
+    out.constitution_version = version;
+    return build_report_govern_ack(id, version, m.sender, now_unix_secs);
+}
