@@ -28,6 +28,9 @@ CRYPTO_SRCS = vendor/Crypto/BigNumberUtil.cpp \
 test_ed25519_interop: test_ed25519_interop.cpp ../citizenry_envelope.cpp ../citizenry_identity.cpp $(CRYPTO_SRCS)
 	$(CXX) $(CXXFLAGS) -DARDUINO_HOST_TEST -Ivendor -Ivendor/Crypto -o $@ $^
 
+emit_envelope: emit_envelope.cpp ../citizenry_envelope.cpp ../citizenry_identity.cpp $(CRYPTO_SRCS)
+	$(CXX) $(CXXFLAGS) -DARDUINO_HOST_TEST -Ivendor -Ivendor/Crypto -o $@ $^
+
 run: all
 	@for t in $(TESTS); do echo "=== $$t ==="; ./$$t || exit 1; done
 
