@@ -48,11 +48,12 @@ void setup() {
     delay(1000);
     Serial.println("\n=== xiao-citizen booting ===");
 
+    // WiFi must be initialised before WiFi.macAddress() returns the real MAC;
+    // otherwise it reads zeros and we end up with names like xiao-cam-0000.
+    WiFi.mode(WIFI_STA);
     g_name = make_citizen_name();
     Serial.printf("citizen name: %s\n", g_name.c_str());
 
-    // WiFi
-    WiFi.mode(WIFI_STA);
     WiFi.setHostname(g_name.c_str());
     WiFi.begin(WIFI_SSID, WIFI_PSK);
     Serial.print("WiFi");
