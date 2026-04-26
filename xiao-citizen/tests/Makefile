@@ -2,14 +2,13 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -I..
 
-TESTS = test_canonical_json test_envelope_codec test_ed25519_interop
+# Phase 0 tests. test_envelope_codec is a Phase 1 deliverable and is added
+# back to TESTS once the codec round-trip work begins.
+TESTS = test_canonical_json test_ed25519_interop
 
 all: $(TESTS)
 
 test_canonical_json: test_canonical_json.cpp ../citizenry_envelope.cpp
-	$(CXX) $(CXXFLAGS) -o $@ $^
-
-test_envelope_codec: test_envelope_codec.cpp ../citizenry_envelope.cpp
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
 # test_ed25519_interop links rweather/Crypto Ed25519 (vendored).
