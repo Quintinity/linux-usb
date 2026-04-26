@@ -115,7 +115,107 @@ int main() {
         check("stale heartbeat dropped", disp.deliver(wire) == DispatchResult::DropExpired);
     }
 
-    // (2.4 ADVERTISE, 2.6 REPORT cases append below as those builders land.)
+    // ---- 2.4: ADVERTISE (unicast) ----
+    {
+        const std::string PEER = std::string(64, 'e');
+        std::string wire = build_advertise(id, NAME, PORT, /*has_constitution=*/true, PEER, NOW);
+        check("advertise non-empty", !wire.empty());
+        InboundEnvelope captured;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ captured = m; });
+        check("advertise delivered", disp.deliver(wire) == DispatchResult::Delivered);
+        check("advertise type=3", captured.type == 3);
+        check("advertise recipient=peer", captured.recipient == PEER);
+        check("advertise body.name", body_str(captured.body, "name") == NAME);
+        check("advertise body.type=sensor", body_str(captured.body, "type") == "sensor");
+        check("advertise body.state=ok", body_str(captured.body, "state") == "ok");
+        check("advertise body.health=1.0", body_dbl(captured.body, "health") == 1.0);
+        check("advertise body.unicast_port", body_int(captured.body, "unicast_port") == PORT);
+        auto it = captured.body.find("capabilities");
+        check("advertise body.capabilities exists", it != captured.body.end());
+        bool caps_ok = false;
+        if (it != captured.body.end() && it->second.kind == JsonValue::Array) {
+            const auto& arr = it->second.a;
+            caps_ok = (arr.size() == 2)
+                   && arr[0].kind == JsonValue::String && arr[0].s == "video_stream"
+                   && arr[1].kind == JsonValue::String && arr[1].s == "frame_capture";
+        }
+        check("advertise body.capabilities content", caps_ok);
+        auto it2 = captured.body.find("has_constitution");
+        check("advertise body.has_constitution=true",
+              it2 != captured.body.end() && it2->second.kind == JsonValue::Bool && it2->second.b);
+    }
+
+    // ---- 2.4: ADVERTISE with has_constitution=false (post-boot, pre-govern) ----
+    {
+        const std::string PEER = std::string(64, 'd');
+        std::string wire = build_advertise(id, NAME, PORT, /*has_constitution=*/false, PEER, NOW);
+        InboundEnvelope captured;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ captured = m; });
+        check("advertise(false) delivered", disp.deliver(wire) == DispatchResult::Delivered);
+        auto it = captured.body.find("has_constitution");
+        check("advertise body.has_constitution=false",
+              it != captured.body.end() && it->second.kind == JsonValue::Bool && !it->second.b);
+    }
+
+    // ---- 2.4: advertise_target_for_discover extracts recipient + reply port ----
+    {
+        // Build a DISCOVER with body.unicast_port=4242, then deliver it,
+        // then ask the helper for the ADVERTISE target.
+        std::string wire = build_discover(id, "peer-001", 4242, NOW);
+        InboundEnvelope captured;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ captured = m; });
+        check("target: setup deliver", disp.deliver(wire) == DispatchResult::Delivered);
+        AdvertiseTarget t;
+        check("target: extracts ok", advertise_target_for_discover(captured, /*fallback*/0, t));
+        check("target: recipient=sender", t.recipient_pubkey_hex == captured.sender);
+        check("target: reply_port from body", t.reply_port == 4242);
+    }
+
+    // ---- 2.4: target falls back when DISCOVER body lacks unicast_port ----
+    {
+        // Build an oddball DISCOVER without unicast_port (legacy citizen).
+        Envelope env;
+        env.version   = 1;
+        env.type      = 2;
+        env.sender    = id.pubkey_hex();
+        env.recipient = "*";
+        env.timestamp = NOW;
+        env.ttl       = 5.0;
+        env.body_set_string("name", "old-citizen");
+        env.signature = id.sign_hex(canonical_signable_bytes(env));
+        std::string wire = envelope_to_wire(env);
+        InboundEnvelope captured;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ captured = m; });
+        check("target-fallback: deliver", disp.deliver(wire) == DispatchResult::Delivered);
+        AdvertiseTarget t;
+        check("target-fallback: extracts ok",
+              advertise_target_for_discover(captured, /*fallback*/9999, t));
+        check("target-fallback: reply_port=9999", t.reply_port == 9999);
+    }
+
+    // ---- 2.4: target rejects non-DISCOVER inbound envelopes ----
+    {
+        // Heartbeat must not be turned into an advertise target.
+        std::string wire = build_heartbeat(id, NAME, PORT, 1.0, NOW);
+        InboundEnvelope captured;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ captured = m; });
+        disp.deliver(wire);
+        AdvertiseTarget t;
+        check("target rejects non-discover",
+              !advertise_target_for_discover(captured, 0, t));
+    }
+
+    // (2.6 REPORT cases append below as those builders land.)
 
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

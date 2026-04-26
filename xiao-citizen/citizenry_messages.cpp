@@ -11,10 +11,9 @@
 namespace {
 
 // Default TTLs (seconds) — mirror citizenry/protocol.py constants.
-// Other TTLs (ADVERTISE, REPORT) are introduced as their builders land
-// in subsequent commits.
 constexpr double TTL_HEARTBEAT = 6.0;
 constexpr double TTL_DISCOVER  = 5.0;
+constexpr double TTL_ADVERTISE = 30.0;
 
 // Sign env in place, return wire bytes.
 std::string finalize(const Identity& id, Envelope& env) {
@@ -80,4 +79,53 @@ bool HeartbeatScheduler::tick(uint32_t now_ms) {
     return false;
 }
 
-// build_advertise (2.4), build_report_govern_ack (2.6) added later.
+std::string build_advertise(const Identity& id,
+                            const std::string& citizen_name,
+                            uint16_t unicast_port,
+                            bool has_constitution,
+                            const std::string& recipient_pubkey_hex,
+                            double now_unix_secs) {
+    Envelope env;
+    env.version   = 1;
+    env.type      = MsgType::ADVERTISE;
+    env.sender    = id.pubkey_hex();
+    env.recipient = recipient_pubkey_hex;
+    env.timestamp = now_unix_secs;
+    env.ttl       = TTL_ADVERTISE;
+    env.body_set_string("name", citizen_name);
+    env.body_set_string("type", "sensor");
+    env.body_set_double("health", 1.0);
+    env.body_set_string("state", "ok");
+    env.body_set_int("unicast_port", unicast_port);
+    env.body_set_bool("has_constitution", has_constitution);
+    // capabilities array — XIAO Sense exposes both the streaming (Phase 1
+    // legacy /stream) and the citizenry-native frame_capture (Phase 3) paths.
+    JsonValue caps; caps.kind = JsonValue::Array;
+    JsonValue v1; v1.kind = JsonValue::String; v1.s = "video_stream";
+    JsonValue v2; v2.kind = JsonValue::String; v2.s = "frame_capture";
+    caps.a.push_back(v1);
+    caps.a.push_back(v2);
+    env.body["capabilities"] = caps;
+    return finalize(id, env);
+}
+
+bool advertise_target_for_discover(const InboundEnvelope& m,
+                                   uint16_t fallback_port,
+                                   AdvertiseTarget& out) {
+    if (m.type != MsgType::DISCOVER) return false;
+    if (m.sender.empty()) return false;
+    out.recipient_pubkey_hex = m.sender;
+    auto it = m.body.find("unicast_port");
+    if (it != m.body.end() && it->second.kind == JsonValue::Int) {
+        long long p = it->second.i;
+        // Defensive clamp — Python serializes any int into the body.
+        if (p > 0 && p <= 65535) {
+            out.reply_port = (uint16_t)p;
+            return true;
+        }
+    }
+    out.reply_port = fallback_port;
+    return true;
+}
+
+// build_report_govern_ack (2.6) added later.

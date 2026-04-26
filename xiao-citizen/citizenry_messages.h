@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "citizenry_dispatch.h"   // InboundEnvelope (forward-decl insufficient: AdvertiseTarget helper inspects body)
 #include "citizenry_envelope.h"
 #include "citizenry_identity.h"
 #include <cstdint>
@@ -63,5 +64,29 @@ private:
     bool     _started = false;
 };
 
-// (2.4 ADVERTISE and 2.6 REPORT govern_ack are added in the subsequent
-//  commits in this branch.)
+// 2.4: ADVERTISE (unicast). Body: {name, type, capabilities, health, state,
+// unicast_port, has_constitution}. Recipient is the discoverer's pubkey
+// hex; transport-layer destination IP is taken from the inbound DISCOVER's
+// UDP source, transport-layer destination port from the body's
+// `unicast_port` field (extract via advertise_target_for_discover).
+std::string build_advertise(const Identity& id,
+                            const std::string& citizen_name,
+                            uint16_t unicast_port,
+                            bool has_constitution,
+                            const std::string& recipient_pubkey_hex,
+                            double now_unix_secs);
+
+// Pure-logic helper: given an inbound DISCOVER, return the recipient
+// pubkey (always env.sender) and the unicast port to reply to (read from
+// body.unicast_port, falling back to a caller-supplied default for
+// older citizens that omit it). Returns false if the envelope isn't a
+// DISCOVER or the body shape is wrong.
+struct AdvertiseTarget {
+    std::string recipient_pubkey_hex;
+    uint16_t    reply_port = 0;
+};
+bool advertise_target_for_discover(const InboundEnvelope& m,
+                                   uint16_t fallback_port,
+                                   AdvertiseTarget& out);
+
+// (2.6 REPORT govern_ack added in the subsequent commit in this branch.)
