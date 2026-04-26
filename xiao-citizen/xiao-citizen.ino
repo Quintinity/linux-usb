@@ -83,10 +83,20 @@ void setup() {
         Serial.println("transport begin FAILED");
     }
 
-    // mDNS — TXT records and citizenry service get added in Task 1.3
+    // mDNS — citizenry service (matches Python mdns.py SERVICE_TYPE) +
+    // legacy http for /capture and /stream from app_httpd.cpp.
     if (MDNS.begin(g_name.c_str())) {
+        // pubkey_hex() returns std::string; substr() (not Arduino .substring())
+        std::string pub16 = g_identity.pubkey_hex().substr(0, 16);
+        MDNS.addService("armos-citizen", "udp", g_xport.unicast_port());
+        MDNS.addServiceTxt("armos-citizen", "udp", "type", "sensor");
+        MDNS.addServiceTxt("armos-citizen", "udp", "pubkey", pub16.c_str());
+        MDNS.addServiceTxt("armos-citizen", "udp", "caps", "video_stream,frame_capture");
+        MDNS.addServiceTxt("armos-citizen", "udp", "version", "1");
         MDNS.addService("http", "tcp", 80);
-        Serial.println("mDNS started");
+        Serial.println("mDNS armos-citizen registered");
+    } else {
+        Serial.println("MDNS.begin FAILED");
     }
 }
 
