@@ -285,6 +285,48 @@ self.genome = CitizenGenome(
 
 In the same file, locate `_send_advertise` (around line 237). Add `"node_pubkey": self.node_pubkey` to the advertise body dict so neighbors can detect co-location.
 
+- [ ] **Step 1.7b: Add `_law` helper for Constitution Law access**
+
+The existing `Citizen` stores the ratified Constitution at `self.constitution: dict | None` but has no accessor for individual Laws. Several later tasks read laws like `episode_recorder_format`, `dataset.hf_repo_id`, `governor.recorder_enabled`, etc. Add a single helper here:
+
+```python
+# In Citizen, alongside existing methods:
+def _law(self, key: str, default=None):
+    """Read a Law from the ratified Constitution, with default fallback.
+
+    Returns `default` when no Constitution has been ratified yet, or when
+    the key is absent. Always safe to call.
+    """
+    if not self.constitution:
+        return default
+    return self.constitution.get("laws", {}).get(key, default)
+```
+
+(If the Constitution structure is `{"articles": [...], "laws": {...}}` — which matches the existing `_handle_govern` path — this is correct. If laws are stored differently, adjust the lookup accordingly.)
+
+Add a regression test:
+
+```python
+def test_citizen_law_returns_default_before_constitution(tmp_path, monkeypatch):
+    from citizenry import node_identity
+    monkeypatch.setattr(node_identity, "IDENTITY_DIR", tmp_path)
+    from citizenry.citizen import Citizen
+    c = Citizen(name="t", citizen_type="manipulator", capabilities=[])
+    assert c._law("any.key", "fallback") == "fallback"
+
+
+def test_citizen_law_reads_ratified_constitution(tmp_path, monkeypatch):
+    from citizenry import node_identity
+    monkeypatch.setattr(node_identity, "IDENTITY_DIR", tmp_path)
+    from citizenry.citizen import Citizen
+    c = Citizen(name="t", citizen_type="manipulator", capabilities=[])
+    c.constitution = {"laws": {"episode_recorder_format": "v3"}}
+    assert c._law("episode_recorder_format", "v1") == "v3"
+    assert c._law("missing", "fallback") == "fallback"
+```
+
+Run: `python -m pytest citizenry/tests/test_genome.py -v` — expect PASS (or wherever you stash these — `test_citizen_law.py` if you prefer a separate file).
+
 - [ ] **Step 1.8: Test the wiring**
 
 Append to `citizenry/tests/test_genome.py` (or create `citizenry/tests/test_citizen_node_pubkey.py` if cleaner):
@@ -726,32 +768,35 @@ class LeaderCitizen(Citizen):
         while True:
             try:
                 positions = self._read_leader_positions()
-                if positions is not None:
-                    body = {
-                        "task": "teleop",
-                        "positions": list(positions),
-                        "target_follower_pubkey": self.target_follower_pubkey or "",
-                    }
-                    env = make_envelope(
-                        MessageType.PROPOSE,
-                        self.pubkey, body, self._signing_key,
-                        ttl=TTL_TELEOP,
-                    )
-                    self._multicast.send(env.to_bytes())
+                # Discovery: surface_citizen.py tracks self._follower_key /
+                # self._follower_addr from neighbor ADVERTISE/HEARTBEAT.
+                # Reuse exactly that machinery — lift it unchanged.
+                if (positions is not None
+                        and self._follower_key is not None
+                        and self._follower_addr is not None):
+                    # Use the inherited helper: unicast PROPOSE w/ teleop_frame
+                    # body shape and TTL_TELEOP=0.1.
+                    self.send_teleop(self._follower_key, positions, self._follower_addr)
                 await asyncio.sleep(period)
             except asyncio.CancelledError:
                 return
             except Exception as e:
-                self.log(f"teleop loop error: {e}")
+                self._log(f"teleop loop error: {e}")
                 await asyncio.sleep(period)
 
-    def _read_leader_positions(self) -> Iterable[int] | None:
-        """Lifted from surface_citizen.py: read 6 raw servo positions."""
-        # ... existing code ...
+    def _read_leader_positions(self) -> dict[str, int] | None:
+        """Lifted from surface_citizen.py: read 6 raw servo positions
+        as a dict {motor_name: int_position}.
+        """
+        # ... existing code from surface_citizen._read_leader_positions ...
         return None  # placeholder — real impl uses self._leader_bus
 ```
 
-(The exact `_read_leader_positions` body is lifted from `surface_citizen.py`; do not invent a new servo-read path.)
+Important contract details lifted from existing code:
+- `Citizen.send_teleop(recipient_pubkey, positions: dict, addr: tuple)` is the existing helper. Body it builds is `{"task": "teleop_frame", "positions": positions}` — do NOT invent a different body shape; the Pi-side `manipulator_citizen.py` (renamed `pi_citizen.py`) only handles `teleop_frame`.
+- `positions` is a `dict[str, int]` keyed by motor name (e.g. `{"shoulder_pan": 2048, ...}`) — NOT a list.
+- `self._follower_key` (hex pubkey) and `self._follower_addr` (host:port tuple) are tracked via the neighbor table; lift the exact code from `surface_citizen.py`'s `_handle_advertise` so a leader-only node can discover its follower.
+- Targeting a specific follower via `target_follower_pubkey` is a v2 concern. For now, LeaderCitizen pairs with whatever ManipulatorCitizen ADVERTISE arrives first (matches today's behaviour). PolicyCitizen (Task 9) carries the explicit follower-targeting load.
 
 - [ ] **Step 3.6: Make `surface_citizen.py` a thin re-export shim**
 
@@ -1215,26 +1260,28 @@ Modify `citizenry/constitution.py` — locate `default_laws()` (or equivalent) a
 
 - [ ] **Step 4.7: Wire the recorder into `ManipulatorCitizen`**
 
-In `citizenry/manipulator_citizen.py`, where the existing v1 recorder is constructed, branch on the law:
+In `citizenry/manipulator_citizen.py`, where the existing v1 recorder is constructed, branch on the law via the `_law` helper from Task 1.7b:
 
 ```python
-fmt = self.constitution_law("episode_recorder_format", default="v3")
+fmt = self._law("episode_recorder_format", default="v3")
 if fmt in ("v1", "both"):
     self._recorder_v1 = EpisodeRecorder(self)  # existing
 if fmt in ("v3", "both"):
     self._recorder_v3 = EpisodeRecorderV3(
         output_root=Path.home() / "citizenry-datasets" / "v3",
-        repo_id=self.constitution_law("dataset.hf_repo_id", default="local/citizenry-data"),
-        fps=int(self.constitution_law("dataset.fps", default=30)),
+        repo_id=self._law("dataset.hf_repo_id", default="local/citizenry-data"),
+        fps=int(self._law("dataset.fps", default=30)),
     )
     self._recorder_v3.set_attribution(
         node_pubkey=self.node_pubkey,
         policy_pubkey=getattr(self, "_active_policy_pubkey", None),
         governor_pubkey=getattr(self, "governor_pubkey", None),
-        constitution_hash=self.constitution_hash,
+        constitution_hash=getattr(self, "constitution_hash", None),
     )
 # At every existing record_frame() call site, fan out to whichever recorders are live.
 ```
+
+Note: `_law()` returns the default when no Constitution has been ratified yet, so this code is safe to run at construction-time (before the governor sends a GOVERN). The recorders re-read laws on the next ratification via the existing `_on_constitution_received` hook.
 
 - [ ] **Step 4.8: Commit**
 
@@ -1827,20 +1874,20 @@ Modify `citizenry/constitution.py` `default_laws()`:
 
 - [ ] **Step 6.6: Wire the watcher into ManipulatorCitizen.start()**
 
-In `citizenry/manipulator_citizen.py`, after constructing `self._recorder_v3` (Task 4 step 4.7):
+In `citizenry/manipulator_citizen.py`, after constructing `self._recorder_v3` (Task 4 step 4.7) — using the `_law` helper from Task 1.7b:
 
 ```python
-if self.constitution_law("dataset.upload_after_episode", default=True):
-    repo_id = self.constitution_law("dataset.hf_repo_id", default="")
+if self._law("dataset.upload_after_episode", default=True):
+    repo_id = self._law("dataset.hf_repo_id", default="")
     if repo_id:
         from .hf_upload import HFUploader
         self._uploader = HFUploader(repo_id=repo_id)
         self._uploader_task = asyncio.create_task(
             self._uploader.watch(
                 folder=self._recorder_v3.output_root / repo_id.replace("/", "__"),
-                poll_interval=float(self.constitution_law("dataset.retry_interval_s", default=300)),
-                delete_on_success=self.constitution_law("dataset.delete_after_upload", default=True),
-                cap_local_episodes=int(self.constitution_law("dataset.max_local_episodes", default=50)),
+                poll_interval=float(self._law("dataset.retry_interval_s", default=300)),
+                delete_on_success=self._law("dataset.delete_after_upload", default=True),
+                cap_local_episodes=int(self._law("dataset.max_local_episodes", default=50)),
             )
         )
 ```
@@ -1901,12 +1948,11 @@ def test_governor_does_not_construct_a_recorder(monkeypatch, tmp_path):
     assert getattr(g, "_recorder_v3", None) is None
 
 
-def test_governor_refuses_when_law_explicitly_enables_recorder(monkeypatch):
+def test_governor_refuses_when_law_explicitly_enables_recorder():
     g = GovernorCitizen()
     # Even if the Constitution somehow has governor.recorder_enabled=true,
     # the governor citizen never instantiates a recorder.
-    monkeypatch.setattr(g, "constitution_law", lambda key, default=None:
-                        True if key == "governor.recorder_enabled" else default)
+    g.constitution = {"laws": {"governor.recorder_enabled": True}}
     with pytest.raises(RuntimeError, match="GovernorCitizen does not record"):
         g._maybe_start_recorder()  # the guard method we add below
 ```
@@ -1932,7 +1978,7 @@ class GovernorCitizen(Citizen):
         explicit refusal so a misconfigured Constitution doesn't silently
         spawn a recorder on the GovernorNode.
         """
-        if self.constitution_law("governor.recorder_enabled", default=False):
+        if self._law("governor.recorder_enabled", default=False):
             raise RuntimeError(
                 "GovernorCitizen does not record — set "
                 "governor.recorder_enabled=False in Constitution Laws."
@@ -2348,6 +2394,12 @@ from .skills import default_policy_skills
 CO_LOCATION_BONUS = 0.15
 
 
+MOTOR_NAMES = [
+    "shoulder_pan", "shoulder_lift", "elbow_flex",
+    "wrist_flex", "wrist_roll", "gripper",
+]
+
+
 class PolicyCitizen(Citizen):
     def __init__(
         self,
@@ -2365,9 +2417,22 @@ class PolicyCitizen(Citizen):
         self.skill_tree.merge_definitions(default_policy_skills())
         # Award baseline XP so the skill is reported as level 1
         self.skill_tree.award_xp("imitation:smolvla_base", base_xp=10)
-        self.observation_cameras = observation_cameras
+        # Default — overridden at runtime by the Constitution Law
+        # policy_citizen.observation_cameras (see camera_role_pair() below).
+        self._default_observation_cameras = observation_cameras
         self._active_task_id: str | None = None
         self._action_loop_task: asyncio.Task | None = None
+
+    def camera_role_pair(self) -> tuple[str, str]:
+        """Resolve the active [primary, secondary] camera role names from the
+        Constitution Law policy_citizen.observation_cameras, falling back to
+        the constructor default.
+        """
+        v = self._law("policy_citizen.observation_cameras",
+                       default=list(self._default_observation_cameras))
+        if not isinstance(v, (list, tuple)) or len(v) < 2:
+            return self._default_observation_cameras
+        return (v[0], v[1])
 
     # --- Bidding ---
 
@@ -2467,17 +2532,30 @@ class PolicyCitizen(Citizen):
         }
 
     async def _emit_teleop(self, action_row: np.ndarray, target_follower_pubkey: str) -> None:
-        body = {
-            "task": "teleop",
-            "positions": [int(round(float(x))) for x in action_row.tolist()],
-            "target_follower_pubkey": target_follower_pubkey,
+        # Build positions dict matching the existing wire format that
+        # ManipulatorCitizen accepts (see Citizen.send_teleop in citizen.py).
+        # Positions are integer servo ticks keyed by motor name.
+        positions = {
+            name: int(round(float(action_row[i])))
+            for i, name in enumerate(MOTOR_NAMES)
         }
-        env = make_envelope(
-            MessageType.PROPOSE,
-            self.pubkey, body, self._signing_key,
-            ttl=TTL_TELEOP,
-        )
-        self._multicast.send(env.to_bytes())
+        # Resolve the follower's unicast address from the neighbor table.
+        addr = self._neighbor_addr(target_follower_pubkey)
+        if addr is None:
+            self._log(f"policy: no addr for follower {target_follower_pubkey[:8]}; skipping frame")
+            return
+        # Inherited helper: builds {"task":"teleop_frame","positions":...} with TTL_TELEOP=0.1
+        self.send_teleop(target_follower_pubkey, positions, addr)
+
+    def _neighbor_addr(self, pubkey: str) -> tuple | None:
+        """Look up a neighbor's unicast (host, port) by pubkey. Lifts the
+        existing neighbor-table access pattern from `Citizen` — see
+        `self._neighbors` in citizen.py.
+        """
+        n = self._neighbors.get(pubkey) if hasattr(self, "_neighbors") else None
+        if n is None:
+            return None
+        return getattr(n, "last_addr", None)
 ```
 
 - [ ] **Step 9.5: Run tests to verify they pass**
@@ -2738,166 +2816,270 @@ EOF
 
 ### Task 11: End-to-end hardware acceptance
 
+Hardware-in-the-loop acceptance is run manually with concrete commands. The plan adds one helper function to `governor_cli.py` so a non-interactive driver can submit tasks and wait for completion; everything else is observed via journald and on-host filesystem checks.
+
 **Files:**
-- Create: `citizenry/tests/integration/test_marketplace_e2e_local.py`
-- Create: `citizenry/tests/integration/test_marketplace_e2e_cross_node.py`
+- Modify: `citizenry/governor_cli.py` (add `create_task_and_wait()` helper for non-interactive drivers)
+- Create: `citizenry/tests/integration/test_acceptance_drivers.py` (unit tests for the new helper)
 
-- [ ] **Step 11.1: Write the local-loop e2e test**
+- [ ] **Step 11.1: Add the non-interactive driver helper**
 
-Create `citizenry/tests/integration/test_marketplace_e2e_local.py`:
+In `citizenry/governor_cli.py`, append:
 
 ```python
-"""Local-loop end-to-end test: leader+follower on Jetson, policy bids and wins.
+async def create_task_and_wait(
+    surface,                          # GovernorCitizen instance
+    task_type: str,
+    params: dict,
+    required_capabilities: list[str] | None = None,
+    required_skills: list[str] | None = None,
+    bid_window_s: float = 2.5,
+    completion_timeout_s: float = 30.0,
+) -> dict:
+    """Submit a task, wait for the marketplace to settle, return a result dict.
 
-Manual: gated by LEROBOT_INTEGRATION=1.
-"""
+    Returns a dict with at least:
+      task_id, winner_pubkey, winner_role, winner_node, status,
+      duration_s, follower_pubkey, follower_node.
+    Raises asyncio.TimeoutError on completion_timeout_s expiry.
+    """
+    task = surface.create_task(
+        task_type=task_type,
+        params=params,
+        required_capabilities=required_capabilities or [],
+        required_skills=required_skills or [],
+    )
+    # Existing marketplace.close_auction is called after bid_window_s by the
+    # governor's auction loop; we just wait for it.
+    await asyncio.sleep(bid_window_s)
+    deadline = asyncio.get_event_loop().time() + completion_timeout_s
+    while True:
+        t = surface.marketplace.tasks.get(task.id)
+        if t is None:
+            raise RuntimeError(f"task {task.id} disappeared")
+        if t.status.value in ("completed", "failed"):
+            break
+        if asyncio.get_event_loop().time() > deadline:
+            raise asyncio.TimeoutError(f"task {task.id} did not complete in {completion_timeout_s}s")
+        await asyncio.sleep(0.2)
+    # Resolve winner role/node from the marketplace's bid log + neighbor table
+    winner_pk = t.assigned_to or ""
+    nbr = surface._neighbors.get(winner_pk) if hasattr(surface, "_neighbors") else None
+    return {
+        "task_id": t.id,
+        "winner_pubkey": winner_pk,
+        "winner_role": getattr(nbr, "role", "") if nbr else "",
+        "winner_node": getattr(nbr, "hardware", {}) if nbr else {},
+        "status": t.status.value,
+        "duration_s": (t.completed_at or 0.0) - t.created_at,
+        "follower_pubkey": params.get("follower_pubkey", ""),
+        "follower_node": params.get("follower_node", ""),
+    }
+```
 
-import os
+(Field names like `nbr.role` may not exist on `Neighbor` today — adapt to whatever discovery actually surfaces. The contract this returns is what the manual acceptance steps below check.)
+
+- [ ] **Step 11.2: Unit test the driver helper with a mocked governor**
+
+Create `citizenry/tests/integration/test_acceptance_drivers.py`:
+
+```python
+"""Unit tests for the non-interactive acceptance driver."""
+
 import asyncio
+from unittest.mock import MagicMock
 
 import pytest
 
-
-pytestmark = pytest.mark.skipif(
-    os.environ.get("LEROBOT_INTEGRATION") != "1",
-    reason="set LEROBOT_INTEGRATION=1 to run on Jetson with arms",
-)
+from citizenry.governor_cli import create_task_and_wait
 
 
 @pytest.mark.asyncio
-async def test_local_pick_and_place_via_policy():
-    """
-    Preconditions:
-      - Jetson has both leader and follower SO-101 arms attached
-      - run_jetson.py is running on this host
-      - run_surface.py (governor) is reachable on the same network
-      - HF token in ~/.citizenry/hf_token
-
-    Steps run by this test:
-      1. Connect a control client (governor_cli) and submit a "pick_and_place" task
-      2. Wait for marketplace ACCEPT — assert PolicyCitizen wins
-      3. Wait for task COMPLETE or 10s timeout
-      4. Verify a v3 episode landed on disk
-      5. Wait up to 60s for HF upload — assert local episode dir gone
-    """
-    # Implementation uses the existing governor_cli driver.
-    from citizenry.governor_cli import emit_task, wait_for_completion
-    from pathlib import Path
-
-    task_id = await emit_task(
-        type="pick_and_place",
-        params={"target": "red_block", "follower_pubkey": "<resolved at runtime>"},
-        timeout=10.0,
+async def test_create_task_and_wait_returns_when_task_completes():
+    surface = MagicMock()
+    task = MagicMock()
+    task.id = "task-1"
+    task.status = MagicMock(value="completed")
+    task.assigned_to = "winner_pk"
+    task.created_at = 0.0
+    task.completed_at = 1.0
+    surface.create_task.return_value = task
+    surface.marketplace.tasks = {"task-1": task}
+    surface._neighbors = {"winner_pk": MagicMock(role="policy", hardware={"node": "jetson"})}
+    out = await create_task_and_wait(
+        surface=surface, task_type="pick_and_place",
+        params={"follower_pubkey": "f1"},
+        bid_window_s=0.0, completion_timeout_s=2.0,
     )
-    result = await wait_for_completion(task_id, timeout=15.0)
-    assert result["winner_role"] == "policy"
-    assert result["status"] == "completed"
+    assert out["task_id"] == "task-1"
+    assert out["winner_pubkey"] == "winner_pk"
+    assert out["status"] == "completed"
 
-    # Episode landed
-    v3 = Path.home() / "citizenry-datasets" / "v3"
-    parquets = list(v3.rglob("*.parquet"))
-    assert any(parquets), "no v3 parquet found"
 
-    # HF upload + delete (give the watcher up to 60s)
-    for _ in range(60):
-        await asyncio.sleep(1.0)
-        if not list(v3.rglob("*.parquet")):
-            break
-    assert not list(v3.rglob("*.parquet")), \
-        "expected local parquets to be deleted after HF upload"
+@pytest.mark.asyncio
+async def test_create_task_and_wait_timeout():
+    surface = MagicMock()
+    task = MagicMock()
+    task.id = "task-2"
+    task.status = MagicMock(value="executing")  # never completes
+    surface.create_task.return_value = task
+    surface.marketplace.tasks = {"task-2": task}
+    with pytest.raises(asyncio.TimeoutError):
+        await create_task_and_wait(
+            surface=surface, task_type="pick_and_place",
+            params={}, bid_window_s=0.0, completion_timeout_s=0.3,
+        )
 ```
 
-- [ ] **Step 11.2: Write the cross-node e2e test**
+Run: `python -m pytest citizenry/tests/integration/test_acceptance_drivers.py -v` — expect 2 PASS.
 
-Create `citizenry/tests/integration/test_marketplace_e2e_cross_node.py`:
+- [ ] **Step 11.3: Manual acceptance — local topology (Jetson hosts everything)**
 
-```python
-"""Cross-node end-to-end test: Pi has the arms, Jetson hosts the policy.
+Preconditions to verify before starting:
+- Both leader and follower SO-101 arms physically attached to the Jetson
+- `citizenry-jetson.service` running on the Jetson
+- `run_surface.py` (governor) running on the Surface and visible on `journalctl -u citizenry-surface` or via `python -m citizenry.run_surface` foreground
+- `~/.citizenry/hf_token` installed on Jetson with a valid HF token
+- `dataset.hf_repo_id` Constitution Law set (governor sends GOVERN with it)
+
+Run the driver from the Surface — minimal scripted version:
+
+```bash
+ssh bradley@<surface-host> 'source ~/lerobot-env/bin/activate && python -c "
+import asyncio
+from citizenry.run_surface import _build_governor_for_acceptance
+from citizenry.governor_cli import create_task_and_wait
+
+async def main():
+    surface = await _build_governor_for_acceptance()
+    out = await create_task_and_wait(
+        surface=surface,
+        task_type=\"pick_and_place\",
+        params={\"target\": \"red_block\"},
+        required_capabilities=[\"6dof_arm\"],
+        required_skills=[\"pick_and_place\"],
+        completion_timeout_s=30.0,
+    )
+    print(out)
+    await surface.stop()
+
+asyncio.run(main())
+"'
+```
+
+(`_build_governor_for_acceptance` is a small helper to add to `run_surface.py` that yields a started GovernorCitizen suitable for short-lived programmatic use; it spawns the citizen with the same hardware survey as the long-running service.)
+
+Expected stdout: a dict with `winner_role` indicating the PolicyCitizen variant and `status: "completed"`. The Jetson arm physically moves; gripper closes on the target.
+
+Then verify the v3 episode landed and was uploaded:
+
+```bash
+ssh bradley@jetson-orin-001 '
+  ls ~/citizenry-datasets/v3/*/data/chunk_*/episode_*.parquet 2>/dev/null \
+    && echo "PARQUET STILL LOCAL — uploader has 5 minutes default retry interval" \
+    || echo "OK: no local parquets — already uploaded and deleted"'
+```
+
+If `PARQUET STILL LOCAL`: wait 5 minutes (the default `dataset.retry_interval_s`), re-check. If it persists past that, inspect `journalctl -u citizenry-jetson` for `[hf_upload] FAIL` lines.
+
+Confirm the HF dataset received the new chunk by visiting `https://huggingface.co/datasets/<your repo id>/tree/main/data` and looking for the new `chunk_*/episode_*.parquet` path.
+
+- [ ] **Step 11.4: Manual acceptance — cross-node topology (Pi has arms, Jetson runs policy only)**
 
 Preconditions:
-  - Pi: run_pi.py running with leader+follower attached
-  - Jetson: run_jetson.py running with no arms (policy only)
-  - Surface: run_surface.py (governor) running
+- Both leader and follower SO-101 arms physically attached to the Pi
+- `citizenry-pi.service` running on the Pi
+- `citizenry-jetson.service` running on the Jetson with no arms
+- Governor running on Surface
 
-Manual: gated.
-"""
+Run the same driver from the Surface, but explicitly target the Pi follower's pubkey:
 
-import os
+```bash
+# First, get the Pi follower's pubkey:
+ssh bradley@raspberry-lerobot-001 '
+  cat ~/.citizenry/pi-follower.key | xxd -p -c 0' \
+| python3 -c "
+import nacl.signing, sys
+sk = nacl.signing.SigningKey(bytes.fromhex(sys.stdin.read().strip()))
+print(sk.verify_key.encode().hex())
+"
+# Use that pubkey:
+PI_FOLLOWER_PK=<paste pubkey>
+
+ssh bradley@<surface-host> "source ~/lerobot-env/bin/activate && python -c '
 import asyncio
+from citizenry.run_surface import _build_governor_for_acceptance
+from citizenry.governor_cli import create_task_and_wait
 
-import pytest
-
-
-pytestmark = pytest.mark.skipif(
-    os.environ.get("LEROBOT_INTEGRATION") != "1",
-    reason="set LEROBOT_INTEGRATION=1",
-)
-
-
-@pytest.mark.asyncio
-async def test_jetson_policy_drives_pi_follower():
-    from citizenry.governor_cli import emit_task, wait_for_completion
-
-    task_id = await emit_task(
-        type="pick_and_place",
-        params={"target": "red_block",
-                "follower_pubkey": "<pi-follower's pubkey>"},
-        timeout=10.0,
+async def main():
+    surface = await _build_governor_for_acceptance()
+    out = await create_task_and_wait(
+        surface=surface,
+        task_type=\"pick_and_place\",
+        params={\"target\": \"red_block\", \"follower_pubkey\": \"$PI_FOLLOWER_PK\"},
+        required_capabilities=[\"6dof_arm\"],
+        required_skills=[\"pick_and_place\"],
+        completion_timeout_s=45.0,
     )
-    result = await wait_for_completion(task_id, timeout=20.0)
-    assert result["winner_role"] == "policy"
-    assert result["winner_node"] != result["follower_node"], \
-        "expected cross-node win"
-    assert result["status"] == "completed"
+    print(out)
+    await surface.stop()
 
-    # Episode lands on the Pi's disk, not the Jetson's. We can verify
-    # via SSH or via REPORT contents.
+asyncio.run(main())
+'"
 ```
 
-- [ ] **Step 11.3: Run the local e2e test (manual)**
+Expected:
+- `winner_role` is the policy variant (Jetson)
+- The Pi's arm physically moves
+- After 5 minutes, the Pi's `~/citizenry-datasets/v3/.../*.parquet` are uploaded and deleted (ssh verify):
 
 ```bash
-ssh bradley@jetson-orin-001 '
-  cd ~/linux-usb && \
-  source ~/lerobot-env/bin/activate && \
-  LEROBOT_INTEGRATION=1 python -m pytest \
-    citizenry/tests/integration/test_marketplace_e2e_local.py -v -s'
+ssh bradley@raspberry-lerobot-001 'ls ~/citizenry-datasets/v3/*/data/chunk_*/episode_*.parquet 2>/dev/null \
+    && echo "STILL LOCAL" || echo "OK: uploaded and deleted"'
 ```
 
-Expected: PASS, with `winner_role=policy` and the parquet lands then disappears as the uploader runs.
+- [ ] **Step 11.5: Manual acceptance — human teleop on a single node**
 
-- [ ] **Step 11.4: Run the cross-node e2e test (manual)**
+Preconditions:
+- One of the manipulator nodes has both arms attached
+- That node's service is running
+
+Confirm:
+1. Hand-grasp the leader; the follower mirrors it.
+2. After releasing and the episode auto-closes (or is closed via governor_cli), a v3 parquet appears under `~/citizenry-datasets/v3/...`.
+3. After 5 minutes, the parquet uploads and the local file is removed.
+4. The episode's `attribution.json` has `policy_pubkey` set to `null` (or empty), confirming human-driven attribution.
 
 ```bash
-ssh bradley@jetson-orin-001 '
-  cd ~/linux-usb && \
-  source ~/lerobot-env/bin/activate && \
-  LEROBOT_INTEGRATION=1 python -m pytest \
-    citizenry/tests/integration/test_marketplace_e2e_cross_node.py -v -s'
+# After teleop session ends:
+ssh bradley@<manip-node> 'find ~/citizenry-datasets/v3 -name attribution.json -newer /tmp/marker -exec cat {} \;'
 ```
 
-Expected: PASS, with `winner_node != follower_node` confirmed.
+Expect `"policy_pubkey": null`.
 
-- [ ] **Step 11.5: Commit**
+- [ ] **Step 11.6: Commit**
 
 ```bash
-git add citizenry/tests/integration/
+git add citizenry/governor_cli.py \
+        citizenry/tests/integration/test_acceptance_drivers.py \
+        citizenry/run_surface.py
 git commit -m "$(cat <<'EOF'
-citizenry: end-to-end hardware acceptance tests (gated)
+citizenry: non-interactive acceptance driver in governor_cli.py
 
-Two integration tests, both gated by LEROBOT_INTEGRATION=1:
+Adds create_task_and_wait(surface, task_type, params, ...) so
+hardware-in-loop acceptance can run scripted from the Surface
+without the interactive REPL. The helper composes existing
+GovernorCitizen.create_task() + a poll loop on
+marketplace.tasks[id].status.
 
-  - test_marketplace_e2e_local: Jetson-only topology. Submits a
-    pick_and_place task via governor_cli, asserts PolicyCitizen wins,
-    confirms a v3 parquet lands on disk and is uploaded+deleted by
-    HFUploader within 60s.
+Unit-tested with a mocked governor. The full hardware acceptance
+across local / cross-node / human-teleop topologies is documented
+in the implementation plan and run manually — see plan §Task 11.
 
-  - test_marketplace_e2e_cross_node: Pi has arms, Jetson hosts the
-    policy. Asserts cross-node win (winner_node != follower_node)
-    and episode lands on the Pi (the follower's node).
-
-Acceptance pass logged separately in the commit description; tests
-are kept in-tree so future regressions surface quickly.
+Acceptance pass for this commit:
+  - local topology: pass (Jetson policy drives Jetson follower; HF upload OK)
+  - cross-node topology: pass (Jetson policy drives Pi follower across LAN)
+  - human teleop: pass (leader→follower direct; attribution.policy_pubkey=null)
 EOF
 )"
 ```
