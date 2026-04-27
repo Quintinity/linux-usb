@@ -24,6 +24,44 @@ std::string finalize(const Identity& id, Envelope& env) {
     return envelope_to_wire(env);
 }
 
+// 3.2: minimal base64 encoder (standard alphabet, '=' padding). The Phase 3
+// REPORT frame_capture body carries an OV2640 JPEG (~10–20 KB at QVGA q=12);
+// the encoded string is ~4/3 of that and lives on the heap until the wire
+// envelope is serialised. Decoder side is Python's base64.b64decode which
+// expects canonical padding.
+constexpr char B64_ALPHABET[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+std::string b64_encode(const uint8_t* data, size_t len) {
+    std::string out;
+    out.reserve(((len + 2) / 3) * 4);
+    size_t i = 0;
+    for (; i + 3 <= len; i += 3) {
+        uint32_t v = ((uint32_t)data[i] << 16)
+                   | ((uint32_t)data[i+1] << 8)
+                   |  (uint32_t)data[i+2];
+        out.push_back(B64_ALPHABET[(v >> 18) & 0x3f]);
+        out.push_back(B64_ALPHABET[(v >> 12) & 0x3f]);
+        out.push_back(B64_ALPHABET[(v >>  6) & 0x3f]);
+        out.push_back(B64_ALPHABET[ v        & 0x3f]);
+    }
+    size_t rem = len - i;
+    if (rem == 1) {
+        uint32_t v = (uint32_t)data[i] << 16;
+        out.push_back(B64_ALPHABET[(v >> 18) & 0x3f]);
+        out.push_back(B64_ALPHABET[(v >> 12) & 0x3f]);
+        out.push_back('=');
+        out.push_back('=');
+    } else if (rem == 2) {
+        uint32_t v = ((uint32_t)data[i] << 16) | ((uint32_t)data[i+1] << 8);
+        out.push_back(B64_ALPHABET[(v >> 18) & 0x3f]);
+        out.push_back(B64_ALPHABET[(v >> 12) & 0x3f]);
+        out.push_back(B64_ALPHABET[(v >>  6) & 0x3f]);
+        out.push_back('=');
+    }
+    return out;
+}
+
 } // anon
 
 std::string build_discover(const Identity& id,
@@ -180,6 +218,35 @@ std::string build_reject(const Identity& id,
     env.ttl       = TTL_ACCEPT_REJECT;
     env.body_set_string("result", "reject");
     env.body_set_string("reason", reason);
+    return finalize(id, env);
+}
+
+// 3.2: REPORT frame_capture. The body is the same shape Pi-side
+// CameraCitizen.send_report_frame_capture emits, so a Surface harness or
+// any other proposer can correlate by task_id without protocol changes.
+std::string build_report_frame_capture(const Identity& id,
+                                       const std::string& proposer_pubkey_hex,
+                                       const std::string& task_id,
+                                       const uint8_t* jpeg_buf,
+                                       size_t jpeg_len,
+                                       uint16_t width,
+                                       uint16_t height,
+                                       double now_unix_secs) {
+    Envelope env;
+    env.version   = 1;
+    env.type      = MsgType::REPORT;
+    env.sender    = id.pubkey_hex();
+    env.recipient = proposer_pubkey_hex;
+    env.timestamp = now_unix_secs;
+    env.ttl       = TTL_REPORT;
+    env.body_set_string("type", "frame_capture");
+    env.body_set_string("task_id", task_id);
+    env.body_set_string("frame", b64_encode(jpeg_buf, jpeg_len));
+    env.body_set_int("width",  width);
+    env.body_set_int("height", height);
+    // XIAO has no RTC, so this is seconds-since-boot when called from the
+    // Arduino path. Phase 4 SNTP will replace with wallclock.
+    env.body_set_double("timestamp", now_unix_secs);
     return finalize(id, env);
 }
 

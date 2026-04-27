@@ -111,6 +111,21 @@ std::string build_reject(const Identity& id,
                          const std::string& reason,
                          double now_unix_secs);
 
+// 3.2: REPORT frame_capture (unicast to proposer). Body:
+// {type:"frame_capture", task_id, frame:<base64 JPEG>, width, height,
+//  timestamp}. Mirrors citizenry/camera_citizen.py send_report_frame_capture.
+// `jpeg_buf` is base64-encoded into the body; ownership of the buffer stays
+// with the caller (the caller releases the camera FB after this returns).
+// timestamp echoes now_unix_secs (XIAO has no RTC; Phase 4 SNTP fixes that).
+std::string build_report_frame_capture(const Identity& id,
+                                       const std::string& proposer_pubkey_hex,
+                                       const std::string& task_id,
+                                       const uint8_t* jpeg_buf,
+                                       size_t jpeg_len,
+                                       uint16_t width,
+                                       uint16_t height,
+                                       double now_unix_secs);
+
 // 2.6: persistence interface for the constitution (the GOVERN body). Hardware
 // implementation is NVS-backed (Preferences); the host tests use an in-memory
 // shim. The interface is intentionally tiny — store the version number, the
