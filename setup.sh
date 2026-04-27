@@ -12,11 +12,11 @@ echo -e "${CYAN}Getting Claude Code running on this machine${NC}"
 echo ""
 
 # Step 1: Install basic dependencies
-echo -e "${YELLOW}[1/4] Installing git and curl...${NC}"
+echo -e "${YELLOW}[1/5] Installing git and curl...${NC}"
 sudo apt update && sudo apt install -y git curl
 
 # Step 2: Grant passwordless sudo so Claude Code can run sudo commands autonomously
-echo -e "${YELLOW}[2/4] Configuring passwordless sudo for $USER...${NC}"
+echo -e "${YELLOW}[2/5] Configuring passwordless sudo for $USER...${NC}"
 SUDOERS_FILE="/etc/sudoers.d/${USER}-nopasswd"
 if [ ! -f "$SUDOERS_FILE" ]; then
     echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee "$SUDOERS_FILE" > /dev/null
@@ -26,7 +26,7 @@ else
 fi
 
 # Step 3: Install Claude Code
-echo -e "${YELLOW}[3/4] Installing Claude Code...${NC}"
+echo -e "${YELLOW}[3/5] Installing Claude Code...${NC}"
 if command -v claude &>/dev/null; then
     echo -e "${GREEN}Claude Code already installed, skipping.${NC}"
 else
@@ -35,7 +35,7 @@ else
 fi
 
 # Step 4: Copy Claude context files
-echo -e "${YELLOW}[4/4] Setting up Claude context...${NC}"
+echo -e "${YELLOW}[4/5] Setting up Claude context...${NC}"
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Build the project memory path: ~/.claude/projects/<repo-path-with-dashes>/memory/
@@ -56,6 +56,23 @@ if [ -f "$REPO_DIR/claude-context/CLAUDE.md" ]; then
     echo -e "${GREEN}Copied CLAUDE.md to repo root.${NC}"
 else
     echo -e "${YELLOW}No claude-context/CLAUDE.md found, skipping.${NC}"
+fi
+
+# Step 5: Install per-device Claude persona auto-refresh watcher
+echo -e "${YELLOW}[5/5] Installing Claude persona auto-refresh...${NC}"
+
+# Three user-scope systemd units (claude-persona.{service,path,timer}) keep
+# ~/CLAUDE.md and the device_persona.md memory file accurate as the citizenry
+# stack gets provisioned. Initial refresh fires immediately — at this point
+# the role will be "GenericCitizenryNode" (no citizenry-*.service yet); the
+# hourly timer + ~/.citizenry/node.key path watch upgrade the persona once
+# the stack is in place (after `continue setup` and citizenry-surface.service
+# enablement).
+if [ -f "$REPO_DIR/scripts/install-claude-persona-watch.sh" ]; then
+    bash "$REPO_DIR/scripts/install-claude-persona-watch.sh" \
+        || echo -e "${YELLOW}watcher install exited non-zero — continuing bootstrap${NC}"
+else
+    echo -e "${YELLOW}install-claude-persona-watch.sh not found in $REPO_DIR/scripts — skipping${NC}"
 fi
 
 # Done
