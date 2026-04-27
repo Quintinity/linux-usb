@@ -4,3 +4,14 @@ __pycache__/
 *.pyc
 .coverage
 .pytest_cache/
+
+# xiao-citizen host-compiled test binaries (built locally via make).
+# Wildcard pattern matches any new test_* / emit_* binaries the Makefile
+# adds without requiring a .gitignore edit each time. Source files
+# (.cpp / .h / .json / .md) are explicitly re-included.
+xiao-citizen/tests/test_*
+xiao-citizen/tests/emit_*
+!xiao-citizen/tests/*.cpp
+!xiao-citizen/tests/*.h
+!xiao-citizen/tests/*.json
+!xiao-citizen/tests/*.md

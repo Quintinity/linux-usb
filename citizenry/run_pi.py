@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Run Pi citizens with auto-detection.
 
-Scans for all connected servo controllers and cameras, spawns the right
-citizen for each. Watches for USB hotplug — new devices auto-join,
-unplugged devices broadcast will and stop.
+Surveys local hardware on startup, always spawns a brain citizen so the Pi
+participates in the country regardless of what's plugged in, and additionally
+spawns hardware-specific citizens (PiCitizen per servo bus, CameraCitizen per
+USB camera). A hotplug loop re-surveys every 3s and reacts to deltas: spawns
+new citizens for added devices, stops them for removed ones, and triggers a
+mid-life ADVERTISE so the brain's capabilities propagate immediately.
 
 Usage:
     python -m citizenry.run_pi                    # Auto-detect everything
@@ -13,11 +16,11 @@ Usage:
 import argparse
 import asyncio
 import signal
-import time
-from pathlib import Path
 
 from .pi_citizen import PiCitizen
 from .camera_citizen import CameraCitizen
+from .citizen import Citizen
+from .survey import HardwareMap, project_capabilities, survey_hardware
 
 
 async def main(args):
@@ -42,9 +45,56 @@ async def _run_single(port: str):
     await citizen.stop()
 
 
+def _brain_name(hw: HardwareMap) -> str:
+    """Brain takes its dominant accelerator's name when present."""
+    if any(a.kind.startswith("hailo") for a in hw.accelerators):
+        return "pi-inference"
+    if any(a.kind == "nvidia" for a in hw.accelerators):
+        return "pi-gpu"
+    if any(a.kind.startswith("coral") for a in hw.accelerators):
+        return "pi-edge"
+    return "pi-brain"
+
+
+async def _spawn_servo_citizen(citizens: dict, bus, hw: HardwareMap, name: str):
+    print(f"[hardware] Servo controller: {bus.port} → {name}")
+    try:
+        citizen = PiCitizen(follower_port=bus.port, hardware=hw)
+        citizen.name = name
+        await citizen.start()
+        citizens[bus.port] = citizen
+    except Exception as e:
+        print(f"[hardware] Failed on {bus.port}: {e}")
+
+
+async def _spawn_camera_citizen(citizens: dict, cam, name: str):
+    print(f"[hardware] USB camera: {cam.path} → {name}")
+    try:
+        cam_index = int(cam.path.replace("/dev/video", ""))
+        citizen = CameraCitizen(camera_index=cam_index, name=name)
+        await citizen.start()
+        citizens[cam.path] = citizen
+    except Exception as e:
+        print(f"[hardware] Failed on {cam.path}: {e}")
+
+
+async def _stop_citizen(citizens: dict, key: str, label: str):
+    if key in citizens:
+        print(f"[hotplug] {label} removed: {key}")
+        try:
+            await citizens[key].stop()
+        except Exception:
+            pass
+        del citizens[key]
+
+
 async def _run_auto_detect():
-    """Auto-detect all hardware and spawn citizens."""
+    """Survey hardware, always spawn brain + per-device citizens, then hotplug-watch."""
     print("[auto-detect] Scanning for hardware...")
+
+    hw = await survey_hardware()
+    print(f"[survey] cameras={len(hw.cameras)} accelerators={len(hw.accelerators)} "
+          f"servo_buses={len(hw.servo_buses)} cpu={hw.compute.cpu_model}")
 
     citizens: dict[str, any] = {}
     stop_event = asyncio.Event()
@@ -53,45 +103,35 @@ async def _run_auto_detect():
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop_event.set)
 
-    # Scan for servo controllers
-    servo_ports = _find_servo_ports()
-    for i, port in enumerate(servo_ports):
-        name = f"pi-arm-{i}" if len(servo_ports) > 1 else "pi-follower"
-        print(f"[auto-detect] Servo controller: {port} → {name}")
-        try:
-            citizen = PiCitizen(follower_port=port)
-            citizen.name = name
-            await citizen.start()
-            citizens[port] = citizen
-        except Exception as e:
-            print(f"[auto-detect] Failed on {port}: {e}")
+    # Brain is always present so the Pi is a country member even with no peripherals.
+    brain_name = _brain_name(hw)
+    brain_caps = project_capabilities(hw)
+    print(f"[auto-detect] Brain '{brain_name}' caps={brain_caps}")
+    brain = Citizen(name=brain_name, citizen_type="brain", capabilities=brain_caps)
+    brain.hardware = hw
+    await brain.start()
+    citizens["brain"] = brain
 
-    # Scan for cameras
-    camera_paths = _find_cameras()
-    for i, cam_path in enumerate(camera_paths):
-        name = f"pi-camera-{i}" if len(camera_paths) > 1 else "pi-camera"
-        cam_index = int(cam_path.replace("/dev/video", ""))
-        print(f"[auto-detect] Camera: {cam_path} → {name}")
-        try:
-            citizen = CameraCitizen(camera_index=cam_index, name=name)
-            await citizen.start()
-            citizens[cam_path] = citizen
-        except Exception as e:
-            print(f"[auto-detect] Failed on {cam_path}: {e}")
+    # Per-bus manipulation citizens (claim the actual servo controller).
+    for i, bus in enumerate(hw.servo_buses):
+        name = f"pi-arm-{i}" if len(hw.servo_buses) > 1 else "pi-follower"
+        await _spawn_servo_citizen(citizens, bus, hw, name)
 
-    if not citizens:
-        print("[auto-detect] No hardware found. Waiting for USB hotplug...")
+    # Per-USB-camera sensor citizens. CSI cameras are owned by the brain via its hw map.
+    usb_cams = [c for c in hw.cameras if c.kind == "usb"]
+    for i, cam in enumerate(usb_cams):
+        name = f"pi-camera-{i}" if len(usb_cams) > 1 else "pi-camera"
+        await _spawn_camera_citizen(citizens, cam, name)
 
     print(f"[auto-detect] {len(citizens)} citizens started. Monitoring for hotplug...")
 
-    # Background hotplug monitor
-    monitor_task = asyncio.create_task(_hotplug_loop(citizens, stop_event))
+    monitor_task = asyncio.create_task(_hotplug_loop(citizens, stop_event, hw))
 
     await stop_event.wait()
     print("\nshutting down all citizens...")
     monitor_task.cancel()
 
-    for port, citizen in citizens.items():
+    for citizen in citizens.values():
         try:
             await citizen.stop()
         except Exception:
@@ -99,119 +139,49 @@ async def _run_auto_detect():
     print(f"[auto-detect] {len(citizens)} citizens stopped.")
 
 
-async def _hotplug_loop(citizens: dict, stop_event: asyncio.Event):
-    """Poll for USB changes every 3 seconds."""
-    known_servos = set(_find_servo_ports())
-    known_cameras = set(_find_cameras())
-
+async def _hotplug_loop(citizens: dict, stop_event: asyncio.Event, last_hw: HardwareMap):
+    """Re-survey every 3s; spawn/stop citizens for deltas; brain re-advertises."""
     try:
         while not stop_event.is_set():
             await asyncio.sleep(3)
 
-            current_servos = set(_find_servo_ports())
+            current = await survey_hardware()
+            delta = current.diff(last_hw)
+            if delta.is_empty():
+                continue
 
-            # New servo controllers
-            for port in current_servos - known_servos:
-                idx = len([c for c in citizens.values() if isinstance(c, PiCitizen)])
-                name = f"pi-arm-{idx}"
-                print(f"[hotplug] New servo: {port} → {name}")
-                try:
-                    citizen = PiCitizen(follower_port=port)
-                    citizen.name = name
-                    await citizen.start()
-                    citizens[port] = citizen
-                except Exception as e:
-                    print(f"[hotplug] Failed: {e}")
+            print(f"[hotplug] survey delta: {delta.summary()}")
 
-            # Removed servo controllers
-            for port in known_servos - current_servos:
-                if port in citizens:
-                    print(f"[hotplug] Servo removed: {port}")
-                    try:
-                        await citizens[port].stop()
-                    except Exception:
-                        pass
-                    del citizens[port]
+            for bus in delta.servo_buses_added:
+                idx = sum(1 for c in citizens.values() if isinstance(c, PiCitizen))
+                await _spawn_servo_citizen(citizens, bus, current, f"pi-arm-{idx}")
+            for bus in delta.servo_buses_removed:
+                await _stop_citizen(citizens, bus.port, "Servo")
 
-            current_cameras = set(_find_cameras())
+            for cam in delta.cameras_added:
+                if cam.kind != "usb":
+                    continue  # CSI cams ride on the brain's hw map
+                idx = sum(1 for c in citizens.values() if isinstance(c, CameraCitizen))
+                await _spawn_camera_citizen(citizens, cam, f"pi-camera-{idx}")
+            for cam in delta.cameras_removed:
+                if cam.kind != "usb":
+                    continue
+                await _stop_citizen(citizens, cam.path, "Camera")
 
-            # New cameras
-            for cam_path in current_cameras - known_cameras:
-                idx = len([c for c in citizens.values() if isinstance(c, CameraCitizen)])
-                name = f"pi-camera-{idx}"
-                cam_index = int(cam_path.replace("/dev/video", ""))
-                print(f"[hotplug] New camera: {cam_path} → {name}")
-                try:
-                    citizen = CameraCitizen(camera_index=cam_index, name=name)
-                    await citizen.start()
-                    citizens[cam_path] = citizen
-                except Exception as e:
-                    print(f"[hotplug] Failed: {e}")
+            # Brain mutates its caps + hardware in place and forces an immediate advertise.
+            brain = citizens.get("brain")
+            if brain is not None:
+                new_caps = project_capabilities(current)
+                if new_caps != brain.capabilities:
+                    print(f"[hotplug] Brain caps {brain.capabilities} → {new_caps}")
+                    brain.capabilities = new_caps
+                brain.hardware = current
+                brain._send_advertise()
 
-            # Removed cameras
-            for cam_path in known_cameras - current_cameras:
-                if cam_path in citizens:
-                    print(f"[hotplug] Camera removed: {cam_path}")
-                    try:
-                        await citizens[cam_path].stop()
-                    except Exception:
-                        pass
-                    del citizens[cam_path]
-
-            known_servos = current_servos
-            known_cameras = current_cameras
+            last_hw = current
 
     except asyncio.CancelledError:
         pass
-
-
-def _find_servo_ports() -> list[str]:
-    """Find all Feetech/Dynamixel servo controllers via sysfs."""
-    ports = []
-    tty_path = Path("/sys/class/tty")
-    if not tty_path.exists():
-        return sorted(str(p) for p in Path("/dev").glob("ttyACM*"))
-
-    for entry in sorted(tty_path.iterdir()):
-        try:
-            device_path = entry / "device"
-            if not device_path.exists():
-                continue
-            usb_path = (device_path / "..").resolve()
-            vid_path = usb_path / "idVendor"
-            if not vid_path.exists():
-                continue
-            vid = vid_path.read_text().strip()
-            if vid in ("1a86", "0403"):  # Feetech CH340 / Dynamixel FTDI
-                ports.append(f"/dev/{entry.name}")
-        except Exception:
-            continue
-    return sorted(ports)
-
-
-def _find_cameras() -> list[str]:
-    """Find USB cameras (V4L2 capture devices)."""
-    cameras = []
-    for dev in sorted(Path("/dev").glob("video*")):
-        try:
-            num = int(dev.name.replace("video", ""))
-            if num > 3:  # Skip codec/ISP devices
-                continue
-        except ValueError:
-            continue
-        try:
-            import cv2
-            cap = cv2.VideoCapture(str(dev))
-            if cap.isOpened():
-                ret, _ = cap.read()
-                cap.release()
-                if ret:
-                    cameras.append(str(dev))
-            else:
-                cap.release()
-        except Exception:
-            continue
-    return cameras
 
 
 def cli():

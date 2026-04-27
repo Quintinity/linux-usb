@@ -26,7 +26,7 @@ echo -e "${GREEN}============================================${NC}"
 echo ""
 
 # ── Step 1: Verify we're on RPi 5 ───────────────────────────────────────────
-echo -e "${YELLOW}[1/9] Checking hardware...${NC}"
+echo -e "${YELLOW}[1/11] Checking hardware...${NC}"
 if [ -f /proc/device-tree/model ]; then
     MODEL=$(cat /proc/device-tree/model | tr -d '\0')
     echo -e "  ${GREEN}Board: $MODEL${NC}"
@@ -54,7 +54,7 @@ else
 fi
 
 # ── Step 2: System update + core packages ────────────────────────────────────
-echo -e "${YELLOW}[2/9] Installing system packages...${NC}"
+echo -e "${YELLOW}[2/11] Installing system packages...${NC}"
 sudo apt update
 sudo apt install -y git curl wget build-essential cmake pkg-config \
     python3-dev python3-venv python3-pip \
@@ -67,7 +67,7 @@ sudo apt install -y git curl wget build-essential cmake pkg-config \
     dkms
 
 # ── Step 3: Install Python 3.11 (if on Trixie with 3.13) ────────────────────
-echo -e "${YELLOW}[3/9] Checking Python version...${NC}"
+echo -e "${YELLOW}[3/11] Checking Python version...${NC}"
 PYTHON_VERSION=$(python3 --version | awk '{print $2}')
 PYTHON_MAJOR_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f1,2)
 
@@ -94,7 +94,7 @@ else
 fi
 
 # ── Step 4: Install Hailo runtime ────────────────────────────────────────────
-echo -e "${YELLOW}[4/9] Installing Hailo AI HAT support...${NC}"
+echo -e "${YELLOW}[4/11] Installing Hailo AI HAT support...${NC}"
 if dpkg -l | grep -q hailo-all 2>/dev/null; then
     echo -e "  ${GREEN}hailo-all already installed${NC}"
 else
@@ -110,7 +110,7 @@ if [ -e /dev/hailo0 ]; then
 fi
 
 # ── Step 5: Create Python venv with system site-packages ─────────────────────
-echo -e "${YELLOW}[5/9] Creating Python virtual environment...${NC}"
+echo -e "${YELLOW}[5/11] Creating Python virtual environment...${NC}"
 VENV_DIR=~/armos-env
 
 if [ -d "$VENV_DIR" ]; then
@@ -125,7 +125,7 @@ source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
 
 # ── Step 6: Install LeRobot ──────────────────────────────────────────────────
-echo -e "${YELLOW}[6/9] Installing LeRobot v0.5.0...${NC}"
+echo -e "${YELLOW}[6/11] Installing LeRobot v0.5.0...${NC}"
 pip install "lerobot==0.5.0" || {
     echo -e "  ${YELLOW}LeRobot 0.5.0 failed — trying from source...${NC}"
     pip install "lerobot>=0.4.0"
@@ -140,7 +140,7 @@ python -c "import lerobot; print(f'LeRobot {lerobot.__version__} installed')" ||
 }
 
 # ── Step 7: Apply LeRobot patches (sync_read retry fix) ─────────────────────
-echo -e "${YELLOW}[7/9] Applying LeRobot patches...${NC}"
+echo -e "${YELLOW}[7/11] Applying LeRobot patches...${NC}"
 
 SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
 
@@ -179,7 +179,7 @@ if [ -f "$MOTORS_FILE" ]; then
 fi
 
 # ── Step 8: Configure udev rules and permissions ─────────────────────────────
-echo -e "${YELLOW}[8/9] Configuring USB serial access...${NC}"
+echo -e "${YELLOW}[8/11] Configuring USB serial access...${NC}"
 
 # Feetech servo controller udev rule
 echo 'SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", MODE="0660", GROUP="dialout"' \
@@ -195,8 +195,62 @@ if dpkg -l | grep -q "ii  brltty" 2>/dev/null; then
     echo -e "  ${GREEN}Removed brltty (was stealing serial ports)${NC}"
 fi
 
-# ── Step 9: Copy diagnostic tools ───────────────────────────────────────────
-echo -e "${YELLOW}[9/9] Setting up diagnostic tools...${NC}"
+# ── Step 9: Boot-time auto-start (WiFi autoconnect + systemd service) ───────
+echo -e "${YELLOW}[9/11] Configuring boot-time auto-start...${NC}"
+
+# WiFi: unblock the radio, enable NetworkManager at boot, mark every saved
+# wireless profile as autoconnect. This makes the Pi come up on WiFi after
+# a reboot without any manual rfkill/nmcli commands.
+sudo rfkill unblock all 2>/dev/null || true
+sudo systemctl enable NetworkManager >/dev/null 2>&1 || true
+sudo systemctl enable NetworkManager-wait-online.service >/dev/null 2>&1 || true
+
+WIFI_PROFILES=$(nmcli -t -f NAME,TYPE connection show 2>/dev/null \
+    | awk -F: '$2 ~ /wireless/ {print $1}')
+if [ -n "$WIFI_PROFILES" ]; then
+    while IFS= read -r prof; do
+        [ -z "$prof" ] && continue
+        sudo nmcli connection modify "$prof" \
+            connection.autoconnect yes \
+            connection.autoconnect-retries 0 \
+            >/dev/null 2>&1 && \
+            echo -e "  ${GREEN}WiFi autoconnect enabled: $prof${NC}"
+    done <<< "$WIFI_PROFILES"
+else
+    echo -e "  ${YELLOW}No saved WiFi profiles found — configure one with 'nmcli device wifi connect'${NC}"
+fi
+
+# systemd unit: run citizenry.run_pi as the login user after network is up.
+# PYTHONPATH=$HOME lets 'python -m citizenry.run_pi' find the package at
+# ~/citizenry (where deploy.sh rsyncs it from the Surface).
+sudo tee /etc/systemd/system/citizenry-pi.service > /dev/null <<EOF
+[Unit]
+Description=armOS Pi Citizen — auto-detecting launcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$HOME
+Environment=PYTHONPATH=$HOME
+ExecStart=$HOME/armos-env/bin/python -m citizenry.run_pi
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable citizenry-pi.service >/dev/null 2>&1
+echo -e "  ${GREEN}citizenry-pi.service installed and enabled${NC}"
+echo -e "  ${CYAN}Starts on every boot. Use: sudo systemctl {start|stop|status} citizenry-pi${NC}"
+
+# ── Step 10: Copy diagnostic tools ──────────────────────────────────────────
+echo -e "${YELLOW}[10/11] Setting up diagnostic tools...${NC}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd || echo "$HOME/linux-usb")"
 
@@ -212,13 +266,39 @@ else
     echo -e "  ${CYAN}git clone https://github.com/Quintinity/linux-usb.git ~/linux-usb${NC}"
 fi
 
+# ── Step 11: Install Claude persona auto-refresh watcher (also fires once now) ─
+echo -e "${YELLOW}[11/11] Installing Claude persona auto-refresh...${NC}"
+
+# Installs three user-scope systemd units:
+#   claude-persona.service   — runs claude-persona-refresh.sh (oneshot)
+#   claude-persona.path      — fires when ~/.citizenry/node.key appears/changes
+#   claude-persona.timer     — hourly catch-all for state changes the path can't observe
+# Plus enables linger so user units run without an active login.
+# Plus fires the service once so the device has a current persona right now.
+if [ -f "$SCRIPT_DIR/scripts/install-claude-persona-watch.sh" ]; then
+    bash "$SCRIPT_DIR/scripts/install-claude-persona-watch.sh" \
+        || echo -e "  ${YELLOW}watcher install exited non-zero — continuing setup${NC}"
+elif [ -f "$HOME/install-claude-persona-watch.sh" ]; then
+    bash "$HOME/install-claude-persona-watch.sh" \
+        || echo -e "  ${YELLOW}watcher install exited non-zero — continuing setup${NC}"
+else
+    echo -e "  ${YELLOW}install-claude-persona-watch.sh not found locally — skipping${NC}"
+    echo -e "  ${CYAN}To install manually: copy scripts/install-claude-persona-watch.sh from the Surface and run it.${NC}"
+fi
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN}  armOS RPi 5 Setup Complete!${NC}"
 echo -e "${GREEN}============================================${NC}"
 echo ""
-echo -e "${CYAN}Quick start:${NC}"
+echo -e "${CYAN}Pi citizen runs automatically on boot via citizenry-pi.service.${NC}"
+echo -e "  Status:  sudo systemctl status citizenry-pi"
+echo -e "  Logs:    journalctl -u citizenry-pi -f"
+echo -e "  Start:   sudo systemctl start citizenry-pi"
+echo -e "  Stop:    sudo systemctl stop citizenry-pi"
+echo ""
+echo -e "${CYAN}Activate venv for manual work:${NC}"
 echo -e "  source ~/armos-env/bin/activate"
 echo ""
 echo -e "${CYAN}Detect hardware:${NC}"

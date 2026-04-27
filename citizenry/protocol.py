@@ -53,7 +53,12 @@ class Envelope:
     signature: str = ""   # Hex-encoded Ed25519 signature
 
     def signable_bytes(self) -> bytes:
-        """Canonical bytes for signing — everything except the signature field."""
+        """Canonical bytes for signing — sorted keys, %.3f floats, tight separators.
+
+        Format is locked down so the XIAO C++ firmware can produce byte-identical
+        signables. Do not change without updating tests/test_signable_bytes.py and
+        the C++ implementation in xiao-citizen/citizenry_envelope.cpp.
+        """
         d = {
             "version": self.version,
             "type": self.type,
@@ -63,7 +68,7 @@ class Envelope:
             "ttl": self.ttl,
             "body": self.body,
         }
-        return json.dumps(d, sort_keys=True, separators=(",", ":")).encode()
+        return _canonical_dumps(d).encode()
 
     def sign(self, signing_key: nacl.signing.SigningKey) -> None:
         signed = signing_key.sign(self.signable_bytes())
@@ -86,6 +91,26 @@ class Envelope:
     def from_bytes(cls, data: bytes) -> "Envelope":
         d = json.loads(data)
         return cls(**d)
+
+
+def _canonical_dumps(obj) -> str:
+    """Sorted-keys, %.3f floats, no whitespace. Recursive."""
+    if isinstance(obj, dict):
+        items = sorted(obj.items(), key=lambda kv: kv[0])
+        return "{" + ",".join(f"{_canonical_dumps(k)}:{_canonical_dumps(v)}" for k, v in items) + "}"
+    if isinstance(obj, list):
+        return "[" + ",".join(_canonical_dumps(v) for v in obj) + "]"
+    if isinstance(obj, bool):
+        return "true" if obj else "false"
+    if obj is None:
+        return "null"
+    if isinstance(obj, float):
+        return f"{obj:.3f}"
+    if isinstance(obj, int):
+        return str(obj)
+    if isinstance(obj, str):
+        return json.dumps(obj, ensure_ascii=False)
+    raise TypeError(f"Unsupported type for canonical JSON: {type(obj)}")
 
 
 def make_envelope(

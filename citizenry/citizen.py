@@ -64,6 +64,7 @@ class Neighbor:
     missed_heartbeats: int = 0
     has_constitution: bool = False
     emotional_state: Any = None  # EmotionalState from heartbeat
+    hardware: dict | None = None  # full dict from ADVERTISE, compact dict from HEARTBEAT
 
 
 @dataclass
@@ -119,6 +120,10 @@ class Citizen:
         self.messages_sent = 0
         self.messages_received = 0
         self.start_time: float = 0
+
+        # Slice 3: hardware self-survey result; subclasses set this after super().__init__.
+        # Sent in heartbeat (compact) + advertise (full); None means "no survey available".
+        self.hardware = None
 
         # v2.0: Skill tree, immune memory, mycelium, genome, contracts
         self.skill_tree = SkillTree()
@@ -232,18 +237,21 @@ class Citizen:
 
     def _send_advertise(self, recipient: str = "*", addr: tuple | None = None):
         """Advertise capabilities — broadcast or directed."""
+        body = {
+            "name": self.name,
+            "type": self.citizen_type,
+            "capabilities": self.capabilities,
+            "health": self.health,
+            "state": self.state,
+            "unicast_port": self._unicast.bound_port,
+            "has_constitution": self.constitution_received,
+        }
+        if self.hardware is not None:
+            body["hw"] = self.hardware.to_full_dict()
         env = make_envelope(
             MessageType.ADVERTISE,
             self.pubkey,
-            {
-                "name": self.name,
-                "type": self.citizen_type,
-                "capabilities": self.capabilities,
-                "health": self.health,
-                "state": self.state,
-                "unicast_port": self._unicast.bound_port,
-                "has_constitution": self.constitution_received,
-            },
+            body,
             self._signing_key,
             recipient=recipient,
         )
@@ -286,6 +294,8 @@ class Citizen:
         body["soul_mood"] = self.soul.personality.to_dict().get("movement_style", 0.5)
         body["growth_stage"] = self.growth_tracker.get_stage().name
         body["sleeping"] = self.sleep_engine.is_sleeping
+        if self.hardware is not None:
+            body["hw"] = self.hardware.to_compact_dict()
 
         env = make_envelope(
             MessageType.HEARTBEAT,
@@ -420,6 +430,11 @@ class Citizen:
             emo_data = env.body.get("emotional_state")
             if emo_data:
                 n.emotional_state = EmotionalState.from_dict(emo_data)
+            # Slice 3: refresh hardware compact view if neighbor sent one.
+            # ADVERTISE-supplied full dict is preserved if heartbeat omits hw.
+            hw_compact = env.body.get("hw")
+            if hw_compact is not None:
+                n.hardware = hw_compact
             # Reset presence on heartbeat
             if n.presence != Presence.ONLINE:
                 self._log(f"NEIGHBOR BACK: {n.name} [{short_id(sender)}] — was {n.presence.value}")
@@ -460,6 +475,7 @@ class Citizen:
             last_seen=time.time(),
             state=body.get("state", "idle"),
             has_constitution=body.get("has_constitution", False),
+            hardware=body.get("hw"),
         )
         is_new = sender not in self.neighbors
         self.neighbors[sender] = n

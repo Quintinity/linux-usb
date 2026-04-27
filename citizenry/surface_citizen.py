@@ -19,6 +19,7 @@ from .genome import CitizenGenome, compute_fleet_average
 from .skills import default_manipulator_skills, default_camera_skills
 from .immune import FaultPattern
 from .coordinator import TaskCoordinator
+from .survey import HardwareMap, merge_capabilities
 
 # Motor names matching SO-101 joint order
 MOTOR_NAMES = [
@@ -44,12 +45,15 @@ class SurfaceCitizen(Citizen):
         leader_port: str = "/dev/ttyACM1",
         teleop_fps: float = 60.0,
         auto_teleop: bool = False,
+        hardware: HardwareMap | None = None,
     ):
+        base_caps = ["compute", "govern", "teleop_source"]
         super().__init__(
             name="surface-governor",
             citizen_type="governor",
-            capabilities=["compute", "govern", "teleop_source"],
+            capabilities=merge_capabilities(base_caps, hardware),
         )
+        self.hardware = hardware
         self.leader_port = leader_port
         self.teleop_fps = teleop_fps
         self._auto_teleop = auto_teleop
