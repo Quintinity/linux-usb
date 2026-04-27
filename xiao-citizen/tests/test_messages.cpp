@@ -416,6 +416,46 @@ int main() {
         check("govern: string version → store untouched", !store.has());
     }
 
+    // ---- 3.1: build_accept (ACCEPT_REJECT type 5) ----
+    {
+        const std::string PROPOSER = std::string(64, 'b');
+        std::string wire = build_accept(id, PROPOSER, /*task=*/"frame_capture",
+                                        /*task_id=*/"abc-123", NOW);
+        check("accept non-empty", !wire.empty());
+        InboundEnvelope captured;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ captured = m; });
+        check("accept delivered (sig verifies)",
+              disp.deliver(wire) == DispatchResult::Delivered);
+        check("accept type=5 (ACCEPT_REJECT)", captured.type == MsgType::ACCEPT_REJECT);
+        check("accept sender == us",   captured.sender == id.pubkey_hex());
+        check("accept recipient = proposer", captured.recipient == PROPOSER);
+        check("accept body.result=accept", body_str(captured.body, "result") == "accept");
+        check("accept body.task=frame_capture", body_str(captured.body, "task") == "frame_capture");
+        check("accept body.task_id=abc-123",   body_str(captured.body, "task_id") == "abc-123");
+    }
+
+    // ---- 3.1: build_reject (ACCEPT_REJECT type 5) ----
+    {
+        const std::string PROPOSER = std::string(64, 'c');
+        std::string wire = build_reject(id, PROPOSER, "camera not available", NOW);
+        check("reject non-empty", !wire.empty());
+        InboundEnvelope captured;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ captured = m; });
+        check("reject delivered (sig verifies)",
+              disp.deliver(wire) == DispatchResult::Delivered);
+        check("reject type=5",        captured.type == MsgType::ACCEPT_REJECT);
+        check("reject recipient",     captured.recipient == PROPOSER);
+        check("reject body.result=reject", body_str(captured.body, "result") == "reject");
+        check("reject body.reason",   body_str(captured.body, "reason") == "camera not available");
+        // No task / task_id — those belong only on accept.
+        check("reject body has no task",    captured.body.find("task")    == captured.body.end());
+        check("reject body has no task_id", captured.body.find("task_id") == captured.body.end());
+    }
+
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

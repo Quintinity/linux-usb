@@ -11,10 +11,11 @@
 namespace {
 
 // Default TTLs (seconds) — mirror citizenry/protocol.py constants.
-constexpr double TTL_HEARTBEAT = 6.0;
-constexpr double TTL_DISCOVER  = 5.0;
-constexpr double TTL_ADVERTISE = 30.0;
-constexpr double TTL_REPORT    = 60.0;
+constexpr double TTL_HEARTBEAT     = 6.0;
+constexpr double TTL_DISCOVER      = 5.0;
+constexpr double TTL_ADVERTISE     = 30.0;
+constexpr double TTL_REPORT        = 60.0;
+constexpr double TTL_ACCEPT_REJECT = 10.0;
 
 // Sign env in place, return wire bytes.
 std::string finalize(const Identity& id, Envelope& env) {
@@ -143,6 +144,42 @@ std::string build_report_govern_ack(const Identity& id,
     env.body_set_string("task", "govern_ack");
     env.body_set_string("result", "success");
     env.body_set_int("constitution_version", constitution_version);
+    return finalize(id, env);
+}
+
+// 3.1: ACCEPT_REJECT (type 5). The body shape mirrors the Pi-side
+// CameraCitizen.send_accept / send_reject — proposer correlates by task_id.
+std::string build_accept(const Identity& id,
+                         const std::string& proposer_pubkey_hex,
+                         const std::string& task,
+                         const std::string& task_id,
+                         double now_unix_secs) {
+    Envelope env;
+    env.version   = 1;
+    env.type      = MsgType::ACCEPT_REJECT;
+    env.sender    = id.pubkey_hex();
+    env.recipient = proposer_pubkey_hex;
+    env.timestamp = now_unix_secs;
+    env.ttl       = TTL_ACCEPT_REJECT;
+    env.body_set_string("result", "accept");
+    env.body_set_string("task", task);
+    env.body_set_string("task_id", task_id);
+    return finalize(id, env);
+}
+
+std::string build_reject(const Identity& id,
+                         const std::string& proposer_pubkey_hex,
+                         const std::string& reason,
+                         double now_unix_secs) {
+    Envelope env;
+    env.version   = 1;
+    env.type      = MsgType::ACCEPT_REJECT;
+    env.sender    = id.pubkey_hex();
+    env.recipient = proposer_pubkey_hex;
+    env.timestamp = now_unix_secs;
+    env.ttl       = TTL_ACCEPT_REJECT;
+    env.body_set_string("result", "reject");
+    env.body_set_string("reason", reason);
     return finalize(id, env);
 }
 

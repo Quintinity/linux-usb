@@ -96,6 +96,21 @@ std::string build_report_govern_ack(const Identity& id,
                                     const std::string& governor_pubkey_hex,
                                     double now_unix_secs);
 
+// 3.1: ACCEPT_REJECT (unicast). Body: {result:"accept", task, task_id}.
+// Sent in response to a PROPOSE the citizen will execute. The proposer
+// uses task_id to correlate the eventual REPORT.
+std::string build_accept(const Identity& id,
+                         const std::string& proposer_pubkey_hex,
+                         const std::string& task,
+                         const std::string& task_id,
+                         double now_unix_secs);
+
+// 3.1: ACCEPT_REJECT (unicast). Body: {result:"reject", reason}.
+std::string build_reject(const Identity& id,
+                         const std::string& proposer_pubkey_hex,
+                         const std::string& reason,
+                         double now_unix_secs);
+
 // 2.6: persistence interface for the constitution (the GOVERN body). Hardware
 // implementation is NVS-backed (Preferences); the host tests use an in-memory
 // shim. The interface is intentionally tiny — store the version number, the
