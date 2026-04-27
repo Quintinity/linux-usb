@@ -250,6 +250,87 @@ std::string build_report_frame_capture(const Identity& id,
     return finalize(id, env);
 }
 
+// 3.3: PROPOSE handler. Splits hardware concerns out via CameraSource so
+// the host tests don't pull esp_camera. Caveat: the dispatcher hasn't been
+// extended to plumb source IP through InboundEnvelope yet (Phase 4) so the
+// caller in the sketch unicasts via multicast — recipient pubkey filtering
+// keeps it correct, just noisier.
+std::vector<std::string>
+handle_propose_frame_capture(const InboundEnvelope& m,
+                             const Identity& id,
+                             CameraSource& cam,
+                             uint16_t fallback_reply_port,
+                             double now_unix_secs,
+                             FrameCaptureTarget& out) {
+    std::vector<std::string> result;
+    out.proposer_pubkey_hex.clear();
+    out.reply_port = 0;
+    out.task_id.clear();
+
+    if (m.type != MsgType::PROPOSE) return result;
+    if (m.sender.empty())            return result;
+
+    // Pull task / task_id from the body. body shape:
+    //   {task: "frame_capture", task_id: "..."}
+    std::string task, task_id;
+    auto it_task = m.body.find("task");
+    if (it_task != m.body.end() && it_task->second.kind == JsonValue::String)
+        task = it_task->second.s;
+    auto it_tid = m.body.find("task_id");
+    if (it_tid != m.body.end() && it_tid->second.kind == JsonValue::String)
+        task_id = it_tid->second.s;
+
+    out.proposer_pubkey_hex = m.sender;
+    out.reply_port          = fallback_reply_port;
+    out.task_id             = task_id;
+
+    if (task != "frame_capture") {
+        result.push_back(build_reject(id, m.sender,
+                                      "unknown task: " + task,
+                                      now_unix_secs));
+        return result;
+    }
+    if (!cam.ready()) {
+        result.push_back(build_reject(id, m.sender,
+                                      "camera not available",
+                                      now_unix_secs));
+        return result;
+    }
+
+    // Commit to the work — emit ACCEPT first so the proposer's state machine
+    // doesn't time out while we grab/encode (~50–200 ms on hardware).
+    result.push_back(build_accept(id, m.sender, "frame_capture",
+                                  task_id, now_unix_secs));
+
+    const uint8_t* buf = nullptr;
+    size_t         len = 0;
+    uint16_t       w = 0, h = 0;
+    if (!cam.grab(&buf, &len, &w, &h)) {
+        // Capture failed AFTER we accepted. Keep the ACCEPT, attach a
+        // failure REPORT so the proposer's state machine resolves cleanly
+        // (rather than waiting out a TTL).
+        Envelope env;
+        env.version   = 1;
+        env.type      = MsgType::REPORT;
+        env.sender    = id.pubkey_hex();
+        env.recipient = m.sender;
+        env.timestamp = now_unix_secs;
+        env.ttl       = TTL_REPORT;
+        env.body_set_string("type",    "task_complete");
+        env.body_set_string("task_id", task_id);
+        env.body_set_string("result",  "failed");
+        env.body_set_string("reason",  "frame capture failed");
+        result.push_back(finalize(id, env));
+        cam.release();
+        return result;
+    }
+    result.push_back(build_report_frame_capture(id, m.sender, task_id,
+                                                buf, len, w, h,
+                                                now_unix_secs));
+    cam.release();
+    return result;
+}
+
 // Re-emit a sub-tree of the body in canonical form so we cache the exact bytes
 // that signed the GOVERN. This isn't a perfect serialization (it doesn't
 // include the envelope wrapper, only the inner body) but it's deterministic

@@ -20,6 +20,7 @@
 #include "citizenry_identity.h"
 #include <cstdint>
 #include <string>
+#include <vector>
 
 // MessageType enum mirror — kept here (rather than included from a shared
 // header) because the dispatcher already validates 1..7 and the sketch
@@ -125,6 +126,41 @@ std::string build_report_frame_capture(const Identity& id,
                                        uint16_t width,
                                        uint16_t height,
                                        double now_unix_secs);
+
+// 3.3: hardware-abstract camera interface so the PROPOSE handler is host-
+// testable. The Arduino impl (XiaoCameraSource in xiao-citizen.ino) wraps
+// citizenry_camera_grab/release; host tests use a stub.
+class CameraSource {
+public:
+    virtual ~CameraSource() = default;
+    // grab() yields a JPEG buffer + dimensions. The pointer is borrowed and
+    // must remain valid until release() is called. Return false if the
+    // capture fails or the camera is not ready.
+    virtual bool grab(const uint8_t** out_buf, size_t* out_len,
+                      uint16_t* out_w, uint16_t* out_h) = 0;
+    virtual void release() = 0;
+    // ready() is the cheap "would grab() plausibly succeed" probe used to
+    // emit a fast REJECT before any frame buffer churn.
+    virtual bool ready() const = 0;
+};
+
+// 3.3: PROPOSE handler for task=="frame_capture". Returns vector of envelope
+// wire bytes to emit, in order. Always emits ACCEPT_REJECT (accept or reject)
+// first. On accept the second envelope is the REPORT frame_capture (or a
+// REPORT task_complete with result:"failed" if the actual capture failed
+// after we already accepted). Empty vector only on a non-PROPOSE inbound.
+struct FrameCaptureTarget {
+    std::string proposer_pubkey_hex;
+    uint16_t    reply_port = 0;
+    std::string task_id;
+};
+std::vector<std::string>
+handle_propose_frame_capture(const InboundEnvelope& m,
+                             const Identity& id,
+                             CameraSource& cam,
+                             uint16_t fallback_reply_port,
+                             double now_unix_secs,
+                             FrameCaptureTarget& out);
 
 // 2.6: persistence interface for the constitution (the GOVERN body). Hardware
 // implementation is NVS-backed (Preferences); the host tests use an in-memory

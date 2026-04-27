@@ -532,6 +532,242 @@ int main() {
         check("empty payload frame=''", body_str(cap.body, "frame") == "");
     }
 
+    // ---- 3.3: handle_propose_frame_capture happy path ----
+    {
+        // Stub camera that returns a fixed 6-byte payload.
+        struct FakeCam : public CameraSource {
+            bool grab(const uint8_t** b, size_t* l, uint16_t* w, uint16_t* h) override {
+                static const uint8_t fake[] = {0xff,0xd8,0x01,0x02,0xff,0xd9};
+                *b = fake; *l = sizeof(fake); *w = 320; *h = 240;
+                _grabbed = true;
+                return true;
+            }
+            void release() override { _released = true; }
+            bool ready() const override { return true; }
+            bool _grabbed = false, _released = false;
+        } cam;
+
+        // Build a signed PROPOSE on behalf of a separate proposer identity.
+        Identity proposer;
+        proposer.from_seed(hex_decode(
+            "5555555555555555555555555555555555555555555555555555555555555555"));
+        Envelope prop_env;
+        prop_env.version   = 1;
+        prop_env.type      = MsgType::PROPOSE;
+        prop_env.sender    = proposer.pubkey_hex();
+        prop_env.recipient = id.pubkey_hex();
+        prop_env.timestamp = NOW;
+        prop_env.ttl       = 10.0;
+        prop_env.body_set_string("task",    "frame_capture");
+        prop_env.body_set_string("task_id", "task-7");
+        prop_env.signature = proposer.sign_hex(canonical_signable_bytes(prop_env));
+        std::string wire = envelope_to_wire(prop_env);
+
+        InboundEnvelope inbound;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ inbound = m; });
+        check("propose: setup delivered", disp.deliver(wire) == DispatchResult::Delivered);
+        check("propose: setup type=4",   inbound.type == MsgType::PROPOSE);
+
+        FrameCaptureTarget tgt;
+        auto envs = handle_propose_frame_capture(inbound, id, cam,
+                                                 /*fallback_reply_port=*/4242,
+                                                 NOW, tgt);
+        check("propose: 2 envelopes returned", envs.size() == 2);
+        // First: ACCEPT_REJECT accept
+        InboundEnvelope a;
+        Dispatcher d2;
+        d2.set_now(NOW);
+        d2.set_handler([&](const InboundEnvelope& m){ a = m; });
+        check("propose: accept delivered", d2.deliver(envs[0]) == DispatchResult::Delivered);
+        check("propose: accept type=5", a.type == MsgType::ACCEPT_REJECT);
+        check("propose: accept body.result=accept",
+              body_str(a.body, "result") == "accept");
+        check("propose: accept body.task=frame_capture",
+              body_str(a.body, "task") == "frame_capture");
+        check("propose: accept body.task_id=task-7",
+              body_str(a.body, "task_id") == "task-7");
+        // Second: REPORT frame_capture
+        InboundEnvelope r;
+        Dispatcher d3;
+        d3.set_now(NOW);
+        d3.set_handler([&](const InboundEnvelope& m){ r = m; });
+        check("propose: report delivered", d3.deliver(envs[1]) == DispatchResult::Delivered);
+        check("propose: report type=6 (REPORT)", r.type == MsgType::REPORT);
+        check("propose: report body.type=frame_capture",
+              body_str(r.body, "type") == "frame_capture");
+        check("propose: report body.task_id=task-7",
+              body_str(r.body, "task_id") == "task-7");
+        check("propose: report body.frame matches b64",
+              body_str(r.body, "frame") == "/9gBAv/Z");
+        check("propose: report body.width=320",  body_int(r.body, "width")  == 320);
+        check("propose: report body.height=240", body_int(r.body, "height") == 240);
+        // Both envelopes addressed to the proposer pubkey
+        check("propose: accept recipient = proposer", a.recipient == proposer.pubkey_hex());
+        check("propose: report recipient = proposer", r.recipient == proposer.pubkey_hex());
+        // Camera lifecycle
+        check("propose: camera grabbed",  cam._grabbed);
+        check("propose: camera released", cam._released);
+        // Target out-params
+        check("propose: target proposer = sender", tgt.proposer_pubkey_hex == proposer.pubkey_hex());
+        check("propose: target task_id = task-7",  tgt.task_id == "task-7");
+        check("propose: target reply_port fallback", tgt.reply_port == 4242);
+    }
+
+    // ---- 3.3: rejects when camera is not ready ----
+    {
+        struct DeadCam : public CameraSource {
+            bool grab(const uint8_t**, size_t*, uint16_t*, uint16_t*) override { return false; }
+            void release() override {}
+            bool ready() const override { return false; }
+        } cam;
+
+        Identity proposer;
+        proposer.from_seed(hex_decode(
+            "6666666666666666666666666666666666666666666666666666666666666666"));
+        Envelope prop_env;
+        prop_env.version   = 1;
+        prop_env.type      = MsgType::PROPOSE;
+        prop_env.sender    = proposer.pubkey_hex();
+        prop_env.recipient = id.pubkey_hex();
+        prop_env.timestamp = NOW;
+        prop_env.ttl       = 10.0;
+        prop_env.body_set_string("task",    "frame_capture");
+        prop_env.body_set_string("task_id", "task-x");
+        prop_env.signature = proposer.sign_hex(canonical_signable_bytes(prop_env));
+
+        InboundEnvelope inbound;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ inbound = m; });
+        disp.deliver(envelope_to_wire(prop_env));
+
+        FrameCaptureTarget tgt;
+        auto envs = handle_propose_frame_capture(inbound, id, cam, 0, NOW, tgt);
+        check("propose-not-ready: 1 envelope (reject only)", envs.size() == 1);
+        InboundEnvelope a;
+        Dispatcher d2;
+        d2.set_now(NOW);
+        d2.set_handler([&](const InboundEnvelope& m){ a = m; });
+        check("propose-not-ready: reject delivered", d2.deliver(envs[0]) == DispatchResult::Delivered);
+        check("propose-not-ready: result=reject", body_str(a.body, "result") == "reject");
+        check("propose-not-ready: reason mentions camera",
+              body_str(a.body, "reason").find("camera") != std::string::npos);
+    }
+
+    // ---- 3.3: rejects unknown task name ----
+    {
+        struct UnusedCam : public CameraSource {
+            bool grab(const uint8_t**, size_t*, uint16_t*, uint16_t*) override { return false; }
+            void release() override {}
+            bool ready() const override { return true; }
+        } cam;
+
+        Identity proposer;
+        proposer.from_seed(hex_decode(
+            "7777777777777777777777777777777777777777777777777777777777777777"));
+        Envelope prop_env;
+        prop_env.version   = 1;
+        prop_env.type      = MsgType::PROPOSE;
+        prop_env.sender    = proposer.pubkey_hex();
+        prop_env.recipient = id.pubkey_hex();
+        prop_env.timestamp = NOW;
+        prop_env.ttl       = 10.0;
+        prop_env.body_set_string("task",    "wash_the_dishes");
+        prop_env.body_set_string("task_id", "task-y");
+        prop_env.signature = proposer.sign_hex(canonical_signable_bytes(prop_env));
+
+        InboundEnvelope inbound;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ inbound = m; });
+        disp.deliver(envelope_to_wire(prop_env));
+
+        FrameCaptureTarget tgt;
+        auto envs = handle_propose_frame_capture(inbound, id, cam, 0, NOW, tgt);
+        check("propose-unknown: 1 envelope (reject only)", envs.size() == 1);
+        InboundEnvelope a;
+        Dispatcher d2;
+        d2.set_now(NOW);
+        d2.set_handler([&](const InboundEnvelope& m){ a = m; });
+        check("propose-unknown: reject delivered", d2.deliver(envs[0]) == DispatchResult::Delivered);
+        check("propose-unknown: result=reject", body_str(a.body, "result") == "reject");
+        check("propose-unknown: reason names task",
+              body_str(a.body, "reason").find("wash_the_dishes") != std::string::npos);
+    }
+
+    // ---- 3.3: ignores non-PROPOSE messages (returns empty vector) ----
+    {
+        struct UnusedCam : public CameraSource {
+            bool grab(const uint8_t**, size_t*, uint16_t*, uint16_t*) override { return false; }
+            void release() override {}
+            bool ready() const override { return true; }
+        } cam;
+        // Feed a heartbeat in.
+        std::string wire = build_heartbeat(id, NAME, PORT, 1.0, NOW);
+        InboundEnvelope inbound;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ inbound = m; });
+        disp.deliver(wire);
+
+        FrameCaptureTarget tgt;
+        auto envs = handle_propose_frame_capture(inbound, id, cam, 0, NOW, tgt);
+        check("propose-wrong-type: empty envelope vec", envs.empty());
+        check("propose-wrong-type: target untouched", tgt.proposer_pubkey_hex.empty());
+    }
+
+    // ---- 3.3: capture failure after accept emits accept + failure REPORT ----
+    {
+        struct FailCam : public CameraSource {
+            bool grab(const uint8_t**, size_t*, uint16_t*, uint16_t*) override { return false; }
+            void release() override { _released = true; }
+            bool ready() const override { return true; }
+            bool _released = false;
+        } cam;
+
+        Identity proposer;
+        proposer.from_seed(hex_decode(
+            "8888888888888888888888888888888888888888888888888888888888888888"));
+        Envelope prop_env;
+        prop_env.version   = 1;
+        prop_env.type      = MsgType::PROPOSE;
+        prop_env.sender    = proposer.pubkey_hex();
+        prop_env.recipient = id.pubkey_hex();
+        prop_env.timestamp = NOW;
+        prop_env.ttl       = 10.0;
+        prop_env.body_set_string("task",    "frame_capture");
+        prop_env.body_set_string("task_id", "task-fail");
+        prop_env.signature = proposer.sign_hex(canonical_signable_bytes(prop_env));
+
+        InboundEnvelope inbound;
+        Dispatcher disp;
+        disp.set_now(NOW);
+        disp.set_handler([&](const InboundEnvelope& m){ inbound = m; });
+        disp.deliver(envelope_to_wire(prop_env));
+
+        FrameCaptureTarget tgt;
+        auto envs = handle_propose_frame_capture(inbound, id, cam, 0, NOW, tgt);
+        check("propose-fail: 2 envelopes (accept + failure REPORT)", envs.size() == 2);
+        InboundEnvelope a, r;
+        Dispatcher d2;
+        d2.set_now(NOW);
+        d2.set_handler([&](const InboundEnvelope& m){ a = m; });
+        d2.deliver(envs[0]);
+        Dispatcher d3;
+        d3.set_now(NOW);
+        d3.set_handler([&](const InboundEnvelope& m){ r = m; });
+        d3.deliver(envs[1]);
+        check("propose-fail: first is accept", body_str(a.body, "result") == "accept");
+        check("propose-fail: second is REPORT", r.type == MsgType::REPORT);
+        check("propose-fail: REPORT type=task_complete",
+              body_str(r.body, "type") == "task_complete");
+        check("propose-fail: REPORT result=failed",
+              body_str(r.body, "result") == "failed");
+        check("propose-fail: camera released even on failure", cam._released);
+    }
+
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
