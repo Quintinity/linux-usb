@@ -85,6 +85,7 @@ class Citizen:
         citizen_type: str,
         capabilities: list[str],
         heartbeat_interval: float = 2.0,
+        node_pubkey: str | None = None,
     ):
         self.name = name
         self.citizen_type = citizen_type
@@ -95,6 +96,12 @@ class Citizen:
         self._signing_key = load_or_create_identity(name)
         self.pubkey = pubkey_hex(self._signing_key)
         self.short_id = short_id(self.pubkey)
+
+        # Node identity — shared across all citizens on this machine
+        if node_pubkey is None:
+            from .node_identity import get_node_pubkey
+            node_pubkey = get_node_pubkey()
+        self.node_pubkey = node_pubkey
 
         # Neighbor table
         self.neighbors: dict[str, Neighbor] = {}
@@ -133,6 +140,7 @@ class Citizen:
         self.genome = CitizenGenome(
             citizen_name=name,
             citizen_type=citizen_type,
+            node_pubkey=self.node_pubkey,
         )
         self.emotional_state = EmotionalState()
         self._tasks_completed_count = 0
@@ -245,6 +253,7 @@ class Citizen:
             "state": self.state,
             "unicast_port": self._unicast.bound_port,
             "has_constitution": self.constitution_received,
+            "node_pubkey": self.node_pubkey,
         }
         if self.hardware is not None:
             body["hw"] = self.hardware.to_full_dict()
@@ -580,6 +589,27 @@ class Citizen:
                 self._add_log("GOVERN", short_id(env.sender), f"skills: {len(skill_defs)} defs")
             except Exception as e:
                 self._log(f"skill tree processing failed: {e}")
+
+    def _law(self, key: str, default=None):
+        """Read a Law from the ratified Constitution, with default fallback.
+
+        Returns `default` when no Constitution has been ratified yet, or when
+        the key is absent. Always safe to call.
+
+        Handles both wire format (laws as a list of dicts with 'id'/'params')
+        and simplified test format (laws as a plain dict keyed by law id).
+        """
+        if not self.constitution:
+            return default
+        laws = self.constitution.get("laws", {})
+        if isinstance(laws, dict):
+            # Simplified format: {"laws": {"law.id": value, ...}}
+            return laws.get(key, default)
+        # Wire format: {"laws": [{"id": "...", "description": "...", "params": {...}}, ...]}
+        for law in laws:
+            if isinstance(law, dict) and law.get("id") == key:
+                return law.get("params", default)
+        return default
 
     def _on_neighbor_joined(self, neighbor: Neighbor):
         """Override in subclass to react to new neighbors."""

@@ -130,3 +130,16 @@ class TestFleetAverage:
         )
         avg = compute_fleet_average([g1, g2])
         assert avg.protection["max_torque"] == 500  # From latest
+
+
+def test_genome_carries_node_pubkey():
+    from citizenry.genome import CitizenGenome
+    g = CitizenGenome(
+        citizen_name="jetson-1",
+        citizen_type="policy",
+        node_pubkey="ab" * 32,
+    )
+    assert g.node_pubkey == "ab" * 32
+    d = g.to_dict()
+    assert d["node_pubkey"] == "ab" * 32
+    assert CitizenGenome.from_dict(d).node_pubkey == "ab" * 32
