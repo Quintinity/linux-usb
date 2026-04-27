@@ -47,6 +47,8 @@ static String                         g_name;
 static CitizenryTransport             g_xport;
 static Dispatcher                     g_dispatcher;
 static PreferencesConstitutionStore   g_constitution;
+static HeartbeatScheduler             g_heartbeat;
+static uint32_t                       g_boot_ms = 0;
 // The reply port we ask the governor to use for the ack envelope. UDP is
 // connectionless so the governor will actually reply to the *source* port
 // of our outbound REPORT (i.e. our unicast socket); we still set this so
@@ -109,6 +111,22 @@ void setup() {
                 Serial.printf("[govern] ack sent v=%d\n", tgt.constitution_version);
                 break;
             }
+            case MsgType::DISCOVER: {
+                AdvertiseTarget tgt;
+                if (!advertise_target_for_discover(m, g_unicast_port, tgt)) {
+                    Serial.println("[discover] bad shape");
+                    return;
+                }
+                std::string adv = build_advertise(g_identity, std::string(g_name.c_str()),
+                                                  g_unicast_port, g_constitution.has(),
+                                                  tgt.recipient_pubkey_hex,
+                                                  (double)time(nullptr));
+                // Source IP not piped through dispatcher (Phase 4 fix); reply via
+                // multicast. The discoverer filters by recipient pubkey.
+                g_xport.send_multicast(adv);
+                Serial.println("[discover] advertised");
+                break;
+            }
             default:
                 Serial.printf("[recv envelope type=%d]\n", m.type);
                 break;
@@ -145,9 +163,24 @@ void setup() {
     } else {
         Serial.println("MDNS.begin FAILED");
     }
+
+    // Mark boot moment for uptime; send one-shot DISCOVER so live citizens
+    // ADVERTISE back without waiting for our first heartbeat.
+    g_boot_ms = millis();
+    std::string disc = build_discover(g_identity, std::string(g_name.c_str()),
+                                      g_unicast_port, (double)time(nullptr));
+    g_xport.send_multicast(disc);
+    Serial.println("DISCOVER broadcast");
 }
 
 void loop() {
     g_xport.poll();
+    if (g_heartbeat.tick(millis())) {
+        double uptime = (millis() - g_boot_ms) / 1000.0;
+        std::string hb = build_heartbeat(g_identity, std::string(g_name.c_str()),
+                                         g_unicast_port, uptime,
+                                         (double)time(nullptr));
+        g_xport.send_multicast(hb);
+    }
     delay(2);
 }
