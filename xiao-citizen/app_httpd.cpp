@@ -22,6 +22,7 @@
 #include "sdkconfig.h"
 #include "camera_index.h"
 #include "board_config.h"
+#include "citizenry_camera.h"   // Phase 3.0: shared mutex'd camera grab
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(CONFIG_ARDUHAL_ESP_LOG)
 #include "esp32-hal-log.h"
@@ -108,7 +109,7 @@ static esp_err_t bmp_handler(httpd_req_t *req) {
 #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
   int64_t fr_start = esp_timer_get_time();
 #endif
-  fb = esp_camera_fb_get();
+  fb = citizenry_camera_grab();
   if (!fb) {
     log_e("Camera capture failed");
     httpd_resp_send_500(req);
@@ -127,7 +128,7 @@ static esp_err_t bmp_handler(httpd_req_t *req) {
   uint8_t *buf = NULL;
   size_t buf_len = 0;
   bool converted = frame2bmp(fb, &buf, &buf_len);
-  esp_camera_fb_return(fb);
+  citizenry_camera_release(fb);
   if (!converted) {
     log_e("BMP Conversion failed");
     httpd_resp_send_500(req);
@@ -164,10 +165,10 @@ static esp_err_t capture_handler(httpd_req_t *req) {
 #if defined(LED_GPIO_NUM)
   enable_led(true);
   vTaskDelay(150 / portTICK_PERIOD_MS);  // The LED needs to be turned on ~150ms before the call to esp_camera_fb_get()
-  fb = esp_camera_fb_get();              // or it won't be visible in the frame. A better way to do this is needed.
+  fb = citizenry_camera_grab();          // or it won't be visible in the frame. A better way to do this is needed.
   enable_led(false);
 #else
-  fb = esp_camera_fb_get();
+  fb = citizenry_camera_grab();
 #endif
 
   if (!fb) {
@@ -201,7 +202,7 @@ static esp_err_t capture_handler(httpd_req_t *req) {
     fb_len = jchunk.len;
 #endif
   }
-  esp_camera_fb_return(fb);
+  citizenry_camera_release(fb);
 #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
   int64_t fr_end = esp_timer_get_time();
 #endif
@@ -236,7 +237,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
 #endif
 
   while (true) {
-    fb = esp_camera_fb_get();
+    fb = citizenry_camera_grab();
     if (!fb) {
       log_e("Camera capture failed");
       res = ESP_FAIL;
@@ -245,7 +246,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
       _timestamp.tv_usec = fb->timestamp.tv_usec;
       if (fb->format != PIXFORMAT_JPEG) {
         bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
-        esp_camera_fb_return(fb);
+        citizenry_camera_release(fb);
         fb = NULL;
         if (!jpeg_converted) {
           log_e("JPEG compression failed");

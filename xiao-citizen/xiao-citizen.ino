@@ -12,6 +12,7 @@
 #include "esp_camera.h"
 #include "board_config.h"
 #include "camera_pins.h"
+#include "citizenry_camera.h"
 #include "citizenry_constitution_store.h"
 #include "citizenry_dispatch.h"
 #include "citizenry_identity.h"
@@ -73,6 +74,17 @@ void setup() {
     while (WiFi.status() != WL_CONNECTED && tries < 60) { delay(500); Serial.print('.'); tries++; }
     if (WiFi.status() != WL_CONNECTED) { Serial.println(" FAILED"); return; }
     Serial.printf("\nIP: %s\n", WiFi.localIP().toString().c_str());
+
+    // Camera — Phase 3.0 wires the OV2640 lifecycle behind a mutex so the
+    // legacy http /capture path and the citizenry PROPOSE→REPORT path can
+    // coexist. Failure here is non-fatal: PROPOSE handlers will REJECT.
+    if (!citizenry_camera_begin()) {
+        Serial.println("camera_begin FAILED — frame_capture will REJECT");
+    } else {
+        Serial.printf("camera ready %ux%u jpg\n",
+                      (unsigned)citizenry_camera_width(),
+                      (unsigned)citizenry_camera_height());
+    }
 
     // Identity
     if (!g_identity.load_from_nvs()) {
