@@ -5,6 +5,9 @@ __pycache__/
 .coverage
 .pytest_cache/
 
+# Git worktrees (project-local, isolated workspaces)
+.worktrees/
+
 # xiao-citizen host-compiled test binaries (built locally via make).
 # Wildcard pattern matches any new test_* / emit_* binaries the Makefile
 # adds without requiring a .gitignore edit each time. Source files
