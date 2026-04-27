@@ -266,22 +266,24 @@ else
     echo -e "  ${CYAN}git clone https://github.com/Quintinity/linux-usb.git ~/linux-usb${NC}"
 fi
 
-# ── Step 11: Refresh Claude device persona ──────────────────────────────────
-echo -e "${YELLOW}[11/11] Refreshing Claude device persona...${NC}"
+# ── Step 11: Install Claude persona auto-refresh watcher (also fires once now) ─
+echo -e "${YELLOW}[11/11] Installing Claude persona auto-refresh...${NC}"
 
-# Writes ~/CLAUDE.md and a memory file describing this device's citizenry
-# role (ManipulatorNode / GovernorNode / PolicyNode), enabled services,
-# hardware survey, and node pubkey. Re-run anytime hardware or services
-# change. Idempotent.
-if [ -f "$SCRIPT_DIR/scripts/claude-persona-refresh.sh" ]; then
-    bash "$SCRIPT_DIR/scripts/claude-persona-refresh.sh" \
-        || echo -e "  ${YELLOW}persona refresh exited non-zero — continuing setup${NC}"
-elif [ -f "$HOME/claude-persona-refresh.sh" ]; then
-    bash "$HOME/claude-persona-refresh.sh" \
-        || echo -e "  ${YELLOW}persona refresh exited non-zero — continuing setup${NC}"
+# Installs three user-scope systemd units:
+#   claude-persona.service   — runs claude-persona-refresh.sh (oneshot)
+#   claude-persona.path      — fires when ~/.citizenry/node.key appears/changes
+#   claude-persona.timer     — hourly catch-all for state changes the path can't observe
+# Plus enables linger so user units run without an active login.
+# Plus fires the service once so the device has a current persona right now.
+if [ -f "$SCRIPT_DIR/scripts/install-claude-persona-watch.sh" ]; then
+    bash "$SCRIPT_DIR/scripts/install-claude-persona-watch.sh" \
+        || echo -e "  ${YELLOW}watcher install exited non-zero — continuing setup${NC}"
+elif [ -f "$HOME/install-claude-persona-watch.sh" ]; then
+    bash "$HOME/install-claude-persona-watch.sh" \
+        || echo -e "  ${YELLOW}watcher install exited non-zero — continuing setup${NC}"
 else
-    echo -e "  ${YELLOW}claude-persona-refresh.sh not found locally — skipping${NC}"
-    echo -e "  ${CYAN}To refresh manually: copy scripts/claude-persona-refresh.sh from the Surface and run it.${NC}"
+    echo -e "  ${YELLOW}install-claude-persona-watch.sh not found locally — skipping${NC}"
+    echo -e "  ${CYAN}To install manually: copy scripts/install-claude-persona-watch.sh from the Surface and run it.${NC}"
 fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────
