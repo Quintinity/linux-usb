@@ -50,6 +50,29 @@ static Dispatcher                     g_dispatcher;
 static PreferencesConstitutionStore   g_constitution;
 static HeartbeatScheduler             g_heartbeat;
 static uint32_t                       g_boot_ms = 0;
+
+// 3.4: thin Arduino adapter that lets handle_propose_frame_capture call
+// the mutex'd OV2640 grab without dragging esp_camera into the host tests.
+class XiaoCameraSource : public CameraSource {
+public:
+    bool grab(const uint8_t** b, size_t* l, uint16_t* w, uint16_t* h) override {
+        _fb = citizenry_camera_grab(/*timeout_ms=*/1000);
+        if (!_fb) return false;
+        *b = _fb->buf;
+        *l = _fb->len;
+        *w = citizenry_camera_width();
+        *h = citizenry_camera_height();
+        return true;
+    }
+    void release() override {
+        if (_fb) { citizenry_camera_release(_fb); _fb = nullptr; }
+    }
+    bool ready() const override { return citizenry_camera_ready(); }
+private:
+    camera_fb_t* _fb = nullptr;
+};
+static XiaoCameraSource g_camera_src;
+
 // The reply port we ask the governor to use for the ack envelope. UDP is
 // connectionless so the governor will actually reply to the *source* port
 // of our outbound REPORT (i.e. our unicast socket); we still set this so
@@ -137,6 +160,21 @@ void setup() {
                 // multicast. The discoverer filters by recipient pubkey.
                 g_xport.send_multicast(adv);
                 Serial.println("[discover] advertised");
+                break;
+            }
+            case MsgType::PROPOSE: {
+                FrameCaptureTarget tgt;
+                auto envs = handle_propose_frame_capture(
+                    m, g_identity, g_camera_src,
+                    g_unicast_port, (double)time(nullptr), tgt);
+                for (const auto& e : envs) {
+                    // Same multicast workaround as ADVERTISE / GOVERN ack —
+                    // Phase 4 will promote to unicast once source IP is
+                    // plumbed through InboundEnvelope.
+                    g_xport.send_multicast(e);
+                }
+                Serial.printf("[propose] task_id=%s emitted=%u\n",
+                              tgt.task_id.c_str(), (unsigned)envs.size());
                 break;
             }
             default:
