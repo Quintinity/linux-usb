@@ -100,10 +100,23 @@ class GovernorCitizen(Citizen):
         ))
         self.location_registry.set_local("local")
 
+    def _maybe_start_recorder(self) -> None:
+        """The governor never records. This method exists only as an
+        explicit refusal so a misconfigured Constitution doesn't silently
+        spawn a recorder on the GovernorNode.
+        """
+        if self._law("governor.recorder_enabled", default=False):
+            raise RuntimeError(
+                "GovernorCitizen does not record — set "
+                "governor.recorder_enabled=False in Constitution Laws."
+            )
+        # Otherwise: do nothing.
+
     async def start(self):
         # Create and sign the constitution
         self._init_constitution()
         await super().start()
+        self._maybe_start_recorder()  # explicit no-op when law is correct
         self._log("governor ready — no arms, no recorder")
         self._log("waiting for citizens to join...")
 
