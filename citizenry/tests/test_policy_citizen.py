@@ -1,11 +1,12 @@
 """Tests for PolicyCitizen — bidding, follower targeting, action emission."""
 
-from unittest.mock import MagicMock, patch
+import asyncio
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
-from citizenry.policy_citizen import PolicyCitizen
+from citizenry.policy_citizen import MOTOR_NAMES, PolicyCitizen
 
 
 def _make_policy(tmp_path, monkeypatch, node_pubkey: str = "ab" * 32) -> PolicyCitizen:
@@ -79,3 +80,83 @@ def test_camera_role_pair_reads_constitution_law(tmp_path, monkeypatch):
                   "params": {"value": ["camX", "camY"]}}]
     }
     assert p.camera_role_pair() == ("camX", "camY")
+
+
+@pytest.mark.asyncio
+async def test_execute_task_emits_teleop_when_neighbor_resolves(tmp_path, monkeypatch):
+    """execute_task emits teleop for one action chunk then we cancel."""
+    from citizenry import node_identity
+    monkeypatch.setattr(node_identity, "IDENTITY_DIR", tmp_path)
+    runner = MagicMock()
+    # Return a 5-step chunk (smaller than 50) for faster test
+    runner.act.return_value = np.zeros((5, 6), dtype=np.float32)
+    p = PolicyCitizen(runner=runner, node_pubkey="ab" * 32)
+    # Inject a fake neighbor at the target follower pubkey
+    from citizenry.citizen import Neighbor
+    fake_addr = ("127.0.0.1", 9999)
+    p.neighbors["follower_pk"] = Neighbor(
+        pubkey="follower_pk",
+        name="fake-manipulator",
+        citizen_type="manipulator",
+        capabilities=["6dof_arm"],
+        addr=fake_addr,
+    )
+    # Stub send_teleop so we can count calls without networking
+    sent = []
+    def fake_send_teleop(recipient, positions, addr):
+        sent.append((recipient, dict(positions), addr))
+    monkeypatch.setattr(p, "send_teleop", fake_send_teleop)
+    from citizenry.marketplace import Task
+    task = Task(type="pick_and_place", params={"follower_pubkey": "follower_pk"})
+    # Run the action loop briefly then cancel
+    coro_task = asyncio.create_task(p.execute_task(task, "follower_pk"))
+    await asyncio.sleep(0.05)  # let one chunk start emitting
+    p._active_task_id = None  # signal exit
+    await asyncio.wait_for(coro_task, timeout=2.0)
+    # Should have emitted at least one teleop
+    assert len(sent) >= 1
+    # Each call's positions dict should have 6 motor entries
+    rec, positions, addr = sent[0]
+    assert rec == "follower_pk"
+    assert addr == fake_addr
+    assert len(positions) == 6
+
+
+@pytest.mark.asyncio
+async def test_execute_task_skips_when_neighbor_unresolved(tmp_path, monkeypatch):
+    """If neighbor lookup returns None, _emit_teleop logs and skips — no crash."""
+    from citizenry import node_identity
+    monkeypatch.setattr(node_identity, "IDENTITY_DIR", tmp_path)
+    runner = MagicMock()
+    runner.act.return_value = np.zeros((3, 6), dtype=np.float32)
+    p = PolicyCitizen(runner=runner, node_pubkey="ab" * 32)
+    # No neighbor injected — _neighbor_addr returns None
+    sent = []
+    monkeypatch.setattr(p, "send_teleop", lambda *a, **k: sent.append(a))
+    from citizenry.marketplace import Task
+    task = Task(type="pick_and_place", params={"follower_pubkey": "unknown_pk"})
+    coro_task = asyncio.create_task(p.execute_task(task, "unknown_pk"))
+    await asyncio.sleep(0.05)
+    p._active_task_id = None
+    await asyncio.wait_for(coro_task, timeout=2.0)
+    # Should have emitted ZERO teleop frames (neighbor unresolved)
+    assert len(sent) == 0
+
+
+def test_emit_teleop_drops_frame_with_short_action_row(tmp_path, monkeypatch):
+    """A fine-tuned model with fewer action dims doesn't crash the policy."""
+    from citizenry import node_identity
+    monkeypatch.setattr(node_identity, "IDENTITY_DIR", tmp_path)
+    runner = MagicMock()
+    p = PolicyCitizen(runner=runner, node_pubkey="ab" * 32)
+    sent = []
+    monkeypatch.setattr(p, "send_teleop", lambda *a, **k: sent.append(a))
+    # Inject the neighbor so addr resolves
+    from citizenry.citizen import Neighbor
+    p.neighbors["follower_pk"] = Neighbor(
+        pubkey="follower_pk", name="fake", citizen_type="manipulator",
+        capabilities=["6dof_arm"], addr=("127.0.0.1", 9999),
+    )
+    short_action = np.zeros(3, dtype=np.float32)  # only 3 dims, expected 6
+    asyncio.run(p._emit_teleop(short_action, "follower_pk"))
+    assert len(sent) == 0  # frame dropped

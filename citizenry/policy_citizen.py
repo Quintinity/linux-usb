@@ -75,7 +75,7 @@ class PolicyCitizen(Citizen):
         """
         # Capability gate — claim manipulator caps on behalf of the targeted follower
         for cap in task.required_capabilities:
-            if cap not in self._available_capabilities_for_follower():
+            if cap not in self._available_capabilities_for_follower(target_follower_pubkey):
                 return None
         # Skill gate — heuristic: refuse manipulation skills we don't claim explicitly
         for sk in task.required_skills:
@@ -105,15 +105,22 @@ class PolicyCitizen(Citizen):
             target_follower_pubkey=target_follower_pubkey,
         )
 
-    def _available_capabilities_for_follower(self) -> list[str]:
+    def _available_capabilities_for_follower(self, target_follower_pubkey: str = "") -> list[str]:
         """Caps the policy can satisfy on behalf of the follower.
 
-        Includes both this citizen's caps and the manipulator caps the
-        follower provides. Conservative: claim only well-known follower caps
-        plus our own.
+        When a target follower's neighbor entry is known, claim ITS advertised
+        capabilities. When the follower isn't on the network yet, fall back to
+        a conservative manipulator-arm default.
         """
         out = list(self.capabilities)
-        out.extend(["6dof_arm", "gripper"])
+        n = self.neighbors.get(target_follower_pubkey) if target_follower_pubkey else None
+        if n is not None and getattr(n, "capabilities", None):
+            for cap in n.capabilities:
+                if cap not in out:
+                    out.append(cap)
+        else:
+            # Follower not yet known — conservative default
+            out.extend(["6dof_arm", "gripper"])
         return out
 
     # --- Action loop ---
@@ -127,7 +134,7 @@ class PolicyCitizen(Citizen):
         self._active_task_id = task.id
         try:
             while self._active_task_id == task.id:
-                obs = await self._assemble_observation()
+                obs = await self._assemble_observation()  # TODO: returns stub zeros until camera-cache layer lands
                 if obs is None:
                     await asyncio.sleep(0.05)
                     continue
@@ -156,6 +163,11 @@ class PolicyCitizen(Citizen):
         }
 
     async def _emit_teleop(self, action_row: np.ndarray, target_follower_pubkey: str) -> None:
+        if len(action_row) < len(MOTOR_NAMES):
+            self._log(
+                f"policy: action_row has {len(action_row)} dims, expected {len(MOTOR_NAMES)}; dropping frame"
+            )
+            return
         # Build positions dict matching the existing wire format that
         # ManipulatorCitizen accepts (see Citizen.send_teleop in citizen.py).
         # Positions are integer servo ticks keyed by motor name.
