@@ -61,6 +61,9 @@ class LeaderCitizen(Citizen):
         self._frames_sent = 0
         self._teleop_start: float = 0
 
+        # Set to False during calibration to suppress auto-reconnect proposals
+        self._reconnect_enabled: bool = True
+
     async def start(self):
         await super().start()
         self._log(f"leader ready — arm on {self.leader_port}")
@@ -71,7 +74,7 @@ class LeaderCitizen(Citizen):
 
     def _on_neighbor_joined(self, neighbor: Neighbor):
         """Track the first manipulator that joins; auto-propose teleop if enabled."""
-        if neighbor.citizen_type == "manipulator" and self._follower_key is None:
+        if "6dof_arm" in (neighbor.capabilities or []) and self._follower_key is None:
             self._follower_key = neighbor.pubkey
             self._follower_addr = neighbor.addr
             self._log(f"follower found: {neighbor.name}")
@@ -88,9 +91,14 @@ class LeaderCitizen(Citizen):
             self._log("FOLLOWER DEAD — pausing teleop")
             self._add_log("SAFETY", neighbor.name, "presumed dead — teleop paused")
             self._teleop_active = False
+            self.state = "idle"
+
+        elif neighbor.presence == Presence.DEGRADED:
+            self._log(f"FOLLOWER DEGRADED — monitoring")
+            self._add_log("WARNING", neighbor.name, "degraded — missed heartbeats")
 
         elif neighbor.presence == Presence.ONLINE and old_presence != Presence.ONLINE:
-            if not self._teleop_active and self._auto_teleop:
+            if self._reconnect_enabled and not self._teleop_active:
                 self._log("FOLLOWER BACK — re-proposing teleop")
                 self._add_log("RECONNECT", neighbor.name, "back online — re-proposing teleop")
                 self._propose_teleop(neighbor)
@@ -107,6 +115,21 @@ class LeaderCitizen(Citizen):
         )
 
     # ── Inbound message handlers ──
+
+    def _handle_report(self, env, addr):
+        """Handle REPORT messages — halt teleop immediately on fault from follower."""
+        super()._handle_report(env, addr)
+
+        body = env.body
+        report_type = body.get("type", "unknown")
+
+        if report_type == "fault":
+            detail = body.get("detail", "unknown")
+            self._log(f"FAULT from [{env.sender[:8]}]: {detail}")
+            self._add_log("FAULT", env.sender[:8], detail)
+            if env.sender == self._follower_key and self._teleop_active:
+                self._teleop_active = False
+                self.state = "idle"
 
     def _handle_accept_reject(self, env, addr):
         body = env.body

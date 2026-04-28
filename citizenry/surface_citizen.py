@@ -33,10 +33,8 @@ class SurfaceCitizen(GovernorCitizen):
         super().__init__(hardware=hardware, **kwargs)
         self.leader_port = leader_port
         self.teleop_fps = teleop_fps
-        self._auto_teleop = auto_teleop
 
-        # The leader companion is a separate citizen instance sharing our pubkey
-        # context. It will be started/stopped alongside us.
+        # The leader companion is an independent citizen on the same node. It has its own identity, key, and neighbor table.
         self._leader_companion = LeaderCitizen(
             leader_port=leader_port,
             teleop_fps=teleop_fps,

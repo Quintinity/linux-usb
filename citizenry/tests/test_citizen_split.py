@@ -92,9 +92,10 @@ def test_leader_citizen_instantiates():
 
 def test_surface_citizen_shim_instantiates():
     from citizenry.surface_citizen import SurfaceCitizen
+    from citizenry.leader_citizen import LeaderCitizen
     c = SurfaceCitizen(leader_port="/dev/null", teleop_fps=30.0)
     assert c.citizen_type == "governor"
-    assert isinstance(c._leader_companion, type(c._leader_companion))
+    assert isinstance(c._leader_companion, LeaderCitizen)
     assert c._leader_companion.leader_port == "/dev/null"
     assert c._leader_companion.teleop_fps == 30.0
 
@@ -105,6 +106,34 @@ def test_surface_citizen_teleop_attrs_proxy():
     c = SurfaceCitizen()
     # Default: not active
     assert c._teleop_active is False
-    # Write through the proxy
+    # Write through to the companion
     c._leader_companion._teleop_active = True
     assert c._teleop_active is True
+    # Write through the proxy setter
+    c._teleop_active = False
+    assert c._leader_companion._teleop_active is False
+
+
+def test_leader_handle_report_halts_teleop_on_follower_fault():
+    """Fault from current follower stops the teleop loop."""
+    from citizenry.leader_citizen import LeaderCitizen
+
+    class _FakeEnv:
+        def __init__(self, sender, body):
+            self.sender = sender
+            self.body = body
+
+    c = LeaderCitizen(leader_port="/dev/null")
+    follower_pubkey = "abc123def456"
+    c._follower_key = follower_pubkey
+    c._teleop_active = True
+    c.state = "teleop"
+
+    fault_env = _FakeEnv(
+        sender=follower_pubkey,
+        body={"type": "fault", "detail": "motor overload"},
+    )
+    c._handle_report(fault_env, ("127.0.0.1", 9999))
+
+    assert c._teleop_active is False
+    assert c.state == "idle"
