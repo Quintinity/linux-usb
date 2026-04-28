@@ -70,6 +70,18 @@ class ManipulatorCitizen(Citizen):
 
         # Episode recorder v3 — constructed when the law says "v3" or "both".
         # _law() returns the default ("v3") when no constitution has been ratified.
+        #
+        # Design: "always record locally, upload only when configured" (Option B).
+        #   - The recorder uses repo_id="local/citizenry-data" as a fallback so
+        #     episodes always land on disk even before a constitution is ratified.
+        #   - The HF uploader (created in start()) uses default="" so it only
+        #     activates when the governor explicitly sets dataset.hf_repo_id to a
+        #     real Hugging Face repo.  This split is intentional: local storage is
+        #     free, cloud uploads require credentials and bandwidth consent.
+        #   - _on_constitution_received updates recorder attribution (policy key,
+        #     governor key) when a new constitution arrives, but does NOT recreate
+        #     the recorder just because dataset.hf_repo_id changed — the uploader
+        #     in start() picks up the live law value at launch time.
         self._recorder_v3: EpisodeRecorderV3 | None = None
         fmt = self._law("episode_recorder_format", default="v3")
         if fmt in ("v3", "both"):
@@ -940,7 +952,8 @@ class ManipulatorCitizen(Citizen):
                 final_reward=1.0,
             )
             if self._recorder_v3 is not None:
-                self._recorder_v3.close_episode(
+                await asyncio.to_thread(
+                    self._recorder_v3.close_episode,
                     success=True,
                     notes=f"{task_type} {duration_ms}ms +{xp_earned}XP",
                     duration_s=duration_ms / 1000.0,
@@ -965,7 +978,11 @@ class ManipulatorCitizen(Citizen):
             self._log(f"task failed: [{task_id}] {e}")
             self.episode_recorder.end_episode(success=False, notes=str(e))
             if self._recorder_v3 is not None and self._recorder_v3._open_episode_id is not None:
-                self._recorder_v3.close_episode(success=False, notes=str(e))
+                await asyncio.to_thread(
+                    self._recorder_v3.close_episode,
+                    success=False,
+                    notes=str(e),
+                )
             self.send_report(
                 governor_key,
                 {

@@ -192,6 +192,28 @@ class GovernorCitizen(Citizen):
         # v2.0: Task marketplace bid
         if body.get("accepted") and body.get("task_id"):
             bid = Bid.from_accept_body(body, env.sender)
+
+            # Apply can_citizen_bid filter at intake (Task 2 follower-targeting gate).
+            # We look up the bidder's Neighbor entry so we use the governor's own
+            # record of the bidder's capabilities/health rather than trusting
+            # self-declared fields in the bid message.
+            # If the task isn't in the marketplace yet (race condition between bid
+            # arrival and task creation) we skip the filter and let add_bid handle it.
+            task = self.marketplace.tasks.get(bid.task_id)
+            if task is not None:
+                nbr = self.neighbors.get(env.sender)
+                eligible, reason = self.marketplace.can_citizen_bid(
+                    task=task,
+                    citizen_capabilities=nbr.capabilities if nbr else [],
+                    citizen_skills=[],        # Neighbor doesn't track skills today
+                    citizen_load=0.0,         # No live load tracking on Neighbor
+                    citizen_health=nbr.health if nbr else 1.0,
+                    target_follower_pubkey=bid.target_follower_pubkey,
+                )
+                if not eligible:
+                    self._log(f"bid rejected from {_sid(env)}: {reason}")
+                    return
+
             if self.marketplace.add_bid(bid):
                 self._log(f"bid received: [{bid.task_id}] from {_sid(env)} score={bid.score:.2f}")
             return

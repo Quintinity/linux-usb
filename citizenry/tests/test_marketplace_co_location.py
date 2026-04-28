@@ -1,5 +1,7 @@
 """Tests for the co-location bonus and follower-targeting filter."""
 
+import time
+
 import pytest
 
 from citizenry.marketplace import (
@@ -102,3 +104,79 @@ def test_bid_from_accept_body_pulls_new_fields():
     bid = Bid.from_accept_body(body, sender_pubkey="a"*64)
     assert bid.node_pubkey == "n"*64
     assert bid.target_follower_pubkey == "f"*64
+
+
+def test_governor_filters_misdirected_bids(tmp_path, monkeypatch):
+    """A bid targeting the wrong follower should be rejected at the governor's intake.
+
+    Regression test for I3: _handle_accept_reject must call can_citizen_bid
+    before add_bid so that a bidder claiming the wrong follower_pubkey cannot
+    win an auction even with a high score.
+    """
+    from citizenry import node_identity
+    from citizenry.governor_citizen import GovernorCitizen
+    from citizenry.citizen import Neighbor
+    from citizenry.protocol import Envelope
+
+    monkeypatch.setattr(node_identity, "IDENTITY_DIR", tmp_path)
+
+    gov = GovernorCitizen()
+
+    # Create a task that pins itself to follower "f_correct"
+    task = gov.marketplace.create_task(
+        "pick_and_place",
+        params={"follower_pubkey": "f_correct"},
+        required_capabilities=["6dof_arm"],
+    )
+    task_id = task.id
+
+    bidder_pubkey = "b" * 64
+
+    # Register the bidder as a known neighbor with the right capabilities
+    nbr = Neighbor(
+        pubkey=bidder_pubkey,
+        name="arm-citizen",
+        citizen_type="manipulator",
+        addr=("127.0.0.1", 9000),
+        capabilities=["6dof_arm"],
+    )
+    gov.neighbors[bidder_pubkey] = nbr
+
+    def _make_bid_envelope(target_follower: str) -> tuple[Envelope, str]:
+        body = {
+            "accepted": True,
+            "task_id": task_id,
+            "bid": {
+                "score": 0.99,  # high score — would win without filter
+                "skill_level": 5,
+                "load": 0.0,
+                "health": 1.0,
+                "estimated_duration": 3.0,
+                "node_pubkey": "n" * 64,
+                "target_follower_pubkey": target_follower,
+            },
+        }
+        env = Envelope(
+            version=1,
+            type=3,  # ACCEPT_REJECT
+            sender=bidder_pubkey,
+            recipient=gov.pubkey,
+            timestamp=time.time(),
+            ttl=30.0,
+            body=body,
+        )
+        return env, "127.0.0.1:9000"
+
+    # Bid targeting the WRONG follower — must be rejected
+    env_bad, addr = _make_bid_envelope("f_wrong")
+    gov._handle_accept_reject(env_bad, addr)
+    assert len(gov.marketplace.bids.get(task_id, [])) == 0, (
+        "Misdirected bid should have been filtered before add_bid"
+    )
+
+    # Bid targeting the CORRECT follower — must be accepted
+    env_good, addr = _make_bid_envelope("f_correct")
+    gov._handle_accept_reject(env_good, addr)
+    assert len(gov.marketplace.bids.get(task_id, [])) == 1, (
+        "Correctly targeted bid should have been accepted"
+    )
