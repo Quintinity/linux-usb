@@ -11,9 +11,9 @@
 #include <Preferences.h>
 #include "esp_camera.h"
 #include "esp_mac.h"        // esp_efuse_mac_get_default — reads MAC pre-WiFi
+#include <time.h>           // configTime + time(); SNTP for envelope timestamps
 #include "board_config.h"
 #include "camera_pins.h"
-#include "citizenry_camera.h"
 #include "citizenry_camera.h"
 #include "citizenry_constitution_store.h"
 #include "citizenry_dispatch.h"
@@ -116,6 +116,26 @@ void setup() {
     if (WiFi.status() != WL_CONNECTED) { Serial.println(" FAILED"); return; }
     Serial.printf("\nIP: %s\n", WiFi.localIP().toString().c_str());
 
+    // SNTP — pull wall-clock time so envelope timestamps are real unix seconds
+    // instead of seconds-since-boot. Phase 4.1. Without this the dispatcher's
+    // TTL math still works (everyone uses the same clock-relative-to-receipt),
+    // but a Python neighbor doing strict timestamp validation would reject.
+    // Block briefly for first sync; bail after 5 s and proceed with whatever
+    // we have rather than wedging boot if NTP is unreachable.
+    configTime(0, 0, "pool.ntp.org", "time.google.com", "time.nist.gov");
+    {
+        time_t now = 0;
+        for (int i = 0; i < 25 && now < 1700000000; i++) {  // > 2023 ⇒ synced
+            delay(200);
+            now = time(nullptr);
+        }
+        if (now >= 1700000000) {
+            Serial.printf("SNTP synced: now=%ld\n", (long)now);
+        } else {
+            Serial.println("SNTP not synced after 5s — proceeding with boot-relative time");
+        }
+    }
+
     // Camera — Phase 3.0 wires the OV2640 lifecycle behind a mutex so the
     // legacy http /capture path and the citizenry PROPOSE→REPORT path can
     // coexist. Failure here is non-fatal: PROPOSE handlers will REJECT.
@@ -163,12 +183,18 @@ void setup() {
                     Serial.println("[govern] rejected (bad shape or save failed)");
                     return;
                 }
-                // Phase 2 firmware doesn't yet have the governor's source IP
-                // wired through the dispatcher, so we broadcast the ack.
-                // The governor accepts unicast replies on its own multicast
-                // listener too — see citizenry/protocol.py recipient handling.
-                g_xport.send_multicast(ack);
-                Serial.printf("[govern] ack sent v=%d\n", tgt.constitution_version);
+                // Phase 4.2: source IP/port now plumbed through InboundEnvelope.
+                // Unicast the ack directly to the governor's reply socket so
+                // we don't put a small admin reply onto every neighbor's
+                // multicast listener. Falls back to multicast if for any
+                // reason we don't have a source (host-test replays).
+                if (m.source_ip != 0 && m.source_port != 0) {
+                    g_xport.send_unicast(ack, IPAddress(m.source_ip), m.source_port);
+                    Serial.printf("[govern] ack sent unicast v=%d\n", tgt.constitution_version);
+                } else {
+                    g_xport.send_multicast(ack);
+                    Serial.printf("[govern] ack sent multicast (no source) v=%d\n", tgt.constitution_version);
+                }
                 break;
             }
             case MsgType::DISCOVER: {
@@ -181,10 +207,16 @@ void setup() {
                                                   g_unicast_port, g_constitution.has(),
                                                   tgt.recipient_pubkey_hex,
                                                   (double)time(nullptr));
-                // Source IP not piped through dispatcher (Phase 4 fix); reply via
-                // multicast. The discoverer filters by recipient pubkey.
-                g_xport.send_multicast(adv);
-                Serial.println("[discover] advertised");
+                // Phase 4.2: unicast directly to the discoverer; fall back to
+                // multicast only if source is unavailable. Recipient pubkey
+                // filtering still keeps multicast correct for legacy clients.
+                if (m.source_ip != 0 && m.source_port != 0) {
+                    g_xport.send_unicast(adv, IPAddress(m.source_ip), m.source_port);
+                    Serial.println("[discover] advertised unicast");
+                } else {
+                    g_xport.send_multicast(adv);
+                    Serial.println("[discover] advertised multicast (no source)");
+                }
                 break;
             }
             case MsgType::PROPOSE: {

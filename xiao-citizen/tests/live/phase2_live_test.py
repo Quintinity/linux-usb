@@ -26,20 +26,20 @@ sk = nacl.signing.SigningKey.generate()
 me_pubkey = sk.verify_key.encode(encoder=nacl.encoding.HexEncoder).decode()
 print(f"test driver pubkey: {me_pubkey[:16]}...")
 
-# --- listener ---
+# --- single socket for tx + rx ---
+# Phase 4.2 promoted ADVERTISE + GOVERN-ack to unicast, so the XIAO's reply
+# lands on whatever port we sent the request from. Bind tx + rx to the same
+# multicast port so ephemeral source ports don't lose the unicast reply.
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 sock.bind(("", MULTICAST_PORT))
 mreq = struct.pack("4sl", socket.inet_aton(MULTICAST_GROUP), socket.INADDR_ANY)
 sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
 sock.settimeout(0.5)
 
-# --- sender ---
-tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-tx.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
-
 def send_mcast(env: Envelope):
-    tx.sendto(env.to_bytes(), (MULTICAST_GROUP, MULTICAST_PORT))
+    sock.sendto(env.to_bytes(), (MULTICAST_GROUP, MULTICAST_PORT))
 
 def listen(filter_fn, timeout, label):
     print(f"  listening {timeout:.1f}s for {label}...")
