@@ -3,7 +3,7 @@
 import pytest
 
 from citizenry.marketplace import (
-    Bid, Task, TaskStatus,
+    Bid, Task, TaskMarketplace, TaskStatus,
     compute_bid_score, select_winner,
 )
 
@@ -40,42 +40,39 @@ def test_select_winner_score_only_no_implicit_bonus():
     assert winner.citizen_pubkey == "b"*64
 
 
-def test_can_citizen_bid_for_follower_filters_on_follower_pubkey():
-    from citizenry.marketplace import can_citizen_bid_for_follower
+def test_can_citizen_bid_filters_on_follower_pubkey():
+    mp = TaskMarketplace()
     task = Task(
         type="pick_and_place",
         params={"follower_pubkey": "f1"},
         required_capabilities=["6dof_arm"],
     )
     # Bidder targeting the right follower passes
-    eligible, reason = can_citizen_bid_for_follower(
-        task=task, target_follower_pubkey="f1",
-        citizen_capabilities=["6dof_arm"], citizen_skills=[],
-        citizen_load=0.1, citizen_health=1.0,
+    eligible, reason = mp.can_citizen_bid(
+        task, ["6dof_arm"], [], 0.1, 1.0,
+        target_follower_pubkey="f1",
     )
     assert eligible, reason
     # Bidder targeting a different follower is filtered
-    eligible, reason = can_citizen_bid_for_follower(
-        task=task, target_follower_pubkey="OTHER",
-        citizen_capabilities=["6dof_arm"], citizen_skills=[],
-        citizen_load=0.1, citizen_health=1.0,
+    eligible, reason = mp.can_citizen_bid(
+        task, ["6dof_arm"], [], 0.1, 1.0,
+        target_follower_pubkey="OTHER",
     )
     assert not eligible
     assert "follower" in reason.lower()
 
 
-def test_can_citizen_bid_for_follower_passes_when_task_has_no_follower_filter():
+def test_can_citizen_bid_passes_when_task_has_no_follower_filter():
     """If task.params.follower_pubkey is absent, any target_follower_pubkey is fine."""
-    from citizenry.marketplace import can_citizen_bid_for_follower
+    mp = TaskMarketplace()
     task = Task(
         type="pick_and_place",
         params={},  # no follower_pubkey constraint
         required_capabilities=["6dof_arm"],
     )
-    eligible, reason = can_citizen_bid_for_follower(
-        task=task, target_follower_pubkey="anything",
-        citizen_capabilities=["6dof_arm"], citizen_skills=[],
-        citizen_load=0.1, citizen_health=1.0,
+    eligible, reason = mp.can_citizen_bid(
+        task, ["6dof_arm"], [], 0.1, 1.0,
+        target_follower_pubkey="anything",
     )
     assert eligible, reason
 

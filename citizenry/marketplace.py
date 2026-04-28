@@ -154,39 +154,6 @@ def select_winner(bids: list[Bid]) -> Bid | None:
     )[0]
 
 
-def can_citizen_bid_for_follower(
-    task: Task,
-    target_follower_pubkey: str,
-    citizen_capabilities: list[str],
-    citizen_skills: list[str],
-    citizen_load: float,
-    citizen_health: float,
-) -> tuple[bool, str]:
-    """Check if a citizen can bid for a task, enforcing follower-pubkey targeting.
-
-    If task.params contains a 'follower_pubkey' key and the bidder's
-    target_follower_pubkey does not match, the bid is rejected before any
-    other eligibility checks.  When no follower_pubkey constraint is set,
-    any target_follower_pubkey is accepted and the base eligibility checks
-    (capabilities, skills, health, load) are applied.
-    """
-    required_follower = task.params.get("follower_pubkey")
-    if required_follower and target_follower_pubkey != required_follower:
-        return False, f"follower mismatch: need {required_follower!r}, got {target_follower_pubkey!r}"
-    # Delegate to base eligibility checks
-    for cap in task.required_capabilities:
-        if cap not in citizen_capabilities:
-            return False, f"missing capability: {cap}"
-    for skill in task.required_skills:
-        if skill not in citizen_skills:
-            return False, f"missing skill: {skill}"
-    if citizen_health < 0.2:
-        return False, "health too low"
-    if citizen_load > 0.9:
-        return False, "too busy"
-    return True, "eligible"
-
-
 class TaskMarketplace:
     """Manages the lifecycle of tasks and their auctions."""
 
@@ -284,8 +251,18 @@ class TaskMarketplace:
         citizen_skills: list[str],
         citizen_load: float,
         citizen_health: float,
+        *,
+        target_follower_pubkey: str = "",
     ) -> tuple[bool, str]:
         """Check if a citizen is eligible to bid on a task."""
+        # Follower-targeting filter (spec §4.4):
+        # When the task pins itself to a specific follower via params.follower_pubkey,
+        # only bidders that declare they're driving THAT follower may pass.
+        # An empty target_follower_pubkey is a non-declaration and fails this gate
+        # (defensive — explicit declarations only).
+        requested = task.params.get("follower_pubkey")
+        if requested and target_follower_pubkey != requested:
+            return False, f"follower mismatch: bid targets {target_follower_pubkey[:8]!r}, task wants {requested[:8]!r}"
         # Check capabilities
         for cap in task.required_capabilities:
             if cap not in citizen_capabilities:
