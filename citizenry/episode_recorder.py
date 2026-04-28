@@ -463,6 +463,14 @@ class EpisodeRecorderV3:
         return len(self._open_frames)
 
     def begin_episode(self, task: str, params: dict) -> str:
+        """Open a new episode with a fresh UUID-based id.
+
+        NOTE: citizenry/dataset_v3_migrate.py bypasses this method and sets
+        _open_episode_id, _open_frames, _open_task, _open_params, and
+        _open_started_at directly to preserve legacy episode ids across
+        re-runs. If you rename or restructure those fields, update the
+        migrator in lockstep.
+        """
         if self._open_episode_id is not None:
             raise RuntimeError(
                 f"begin_episode while episode {self._open_episode_id} is open"

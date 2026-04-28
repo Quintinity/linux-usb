@@ -58,7 +58,11 @@ def _episode_id_for_legacy(p: Path) -> str:
 
 
 def _already_converted(eid: str, output_root: Path, repo_safe: str) -> bool:
-    """True if a parquet for this eid already exists under <repo_safe>/data/."""
+    """True if a parquet for this eid already exists under <repo_safe>/data/.
+
+    Retained for backwards-compatible single-episode checks. The main
+    migrate loop builds a set upfront instead to avoid O(N²) rglob calls.
+    """
     return any((output_root / repo_safe).rglob(f"episode_{eid}.parquet"))
 
 
@@ -71,10 +75,16 @@ def _convert_one(legacy_dir: Path, recorder: EpisodeRecorderV3, dry_run: bool) -
 
     actions = sorted(legacy_dir.glob("action_*.npy"))
     frames = sorted(legacy_dir.glob("frame_*.jpg"))
+    truncated_action_frames = max(0, len(actions) - len(frames)) if frames else 0
     n = min(len(actions), len(frames)) if frames else len(actions)
 
     if dry_run:
-        return {"frames_total": n, "skipped": False}
+        return {
+            "frames_total": n,
+            "placeholder_frames": 0,
+            "truncated_action_frames": truncated_action_frames,
+            "skipped": False,
+        }
 
     eid = _episode_id_for_legacy(legacy_dir)
     # Bypass begin_episode's UUID generation to preserve the legacy id.
@@ -87,6 +97,7 @@ def _convert_one(legacy_dir: Path, recorder: EpisodeRecorderV3, dry_run: bool) -
     recorder._open_started_at = manifest.get("started_at", "")
 
     import cv2
+    placeholder_count = 0
     for i in range(n):
         action = np.load(actions[i]).tolist()
         if i < len(frames):
@@ -94,8 +105,10 @@ def _convert_one(legacy_dir: Path, recorder: EpisodeRecorderV3, dry_run: bool) -
             if img is None:
                 # Corrupt / missing image — fall back to a zero placeholder
                 img = np.zeros((48, 64, 3), dtype=np.uint8)
+                placeholder_count += 1
         else:
             img = np.zeros((48, 64, 3), dtype=np.uint8)
+            placeholder_count += 1
         recorder.record_frame(
             frame_index=i,
             timestamp=float(i) / float(manifest.get("fps", 30)),
@@ -112,7 +125,12 @@ def _convert_one(legacy_dir: Path, recorder: EpisodeRecorderV3, dry_run: bool) -
         success=manifest.get("success", True),
         notes=manifest.get("notes", "migrated"),
     )
-    return {"frames_total": n, "skipped": False}
+    return {
+        "frames_total": n,
+        "placeholder_frames": placeholder_count,
+        "truncated_action_frames": truncated_action_frames,
+        "skipped": False,
+    }
 
 
 def migrate_legacy_to_v3(
@@ -135,18 +153,52 @@ def migrate_legacy_to_v3(
         "episodes_converted": 0,
         "episodes_skipped": 0,
         "frames_total": 0,
+        "placeholder_frames": 0,
+        "truncated_action_frames": 0,
+        "errors": [],
         "uploaded": False,
         "deleted": [],
     }
 
+    # Build the set of already-converted episode ids once (O(N) instead of
+    # O(N²) per-episode rglob calls).
+    already: set[str] = set()
+    repo_dir = output_root / repo_safe
+    if repo_dir.exists():
+        already = {
+            p.stem.removeprefix("episode_")
+            for p in repo_dir.rglob("episode_*.parquet")
+        }
+
     for legacy_dir in eps:
         eid = _episode_id_for_legacy(legacy_dir)
-        if _already_converted(eid, output_root, repo_safe):
+        if eid in already:
             report["episodes_skipped"] += 1
             continue
-        r = _convert_one(legacy_dir, recorder, dry_run)
+        try:
+            r = _convert_one(legacy_dir, recorder, dry_run)
+        except Exception as exc:
+            report["errors"].append({"path": str(legacy_dir), "error": str(exc)})
+            # Reset recorder state so the next episode can proceed cleanly.
+            recorder._open_episode_id = None
+            recorder._open_frames = []
+            continue
         report["episodes_converted"] += 1
         report["frames_total"] += r["frames_total"]
+        report["placeholder_frames"] += r.get("placeholder_frames", 0)
+        report["truncated_action_frames"] += r.get("truncated_action_frames", 0)
+        if r.get("placeholder_frames", 0) > 0:
+            print(
+                f"[migrate] WARN: {legacy_dir.name} had "
+                f"{r['placeholder_frames']} placeholder frame(s) "
+                f"(cv2.imread returned None)"
+            )
+        if r.get("truncated_action_frames", 0) > 0:
+            print(
+                f"[migrate] WARN: {legacy_dir.name} truncated "
+                f"{r['truncated_action_frames']} action frame(s) "
+                f"(action count > frame count)"
+            )
         if delete_old and not dry_run:
             import shutil
             shutil.rmtree(legacy_dir)

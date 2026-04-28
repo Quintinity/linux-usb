@@ -85,3 +85,34 @@ def test_delete_old_removes_legacy_paths_after_success(tmp_path):
         upload=False, delete_old=True, dry_run=False,
     )
     assert not (legacy_root / "episode_0001").exists()
+
+
+def test_per_episode_error_does_not_abort_batch(tmp_path, monkeypatch):
+    """A single corrupt episode is captured in report['errors'] but the
+    batch continues."""
+    legacy_root = tmp_path / "legacy"
+    out_root = tmp_path / "v3"
+    _seed_legacy_episode(legacy_root, eid=1, frames=2)
+    _seed_legacy_episode(legacy_root, eid=2, frames=2)
+    _seed_legacy_episode(legacy_root, eid=3, frames=2)
+
+    # Make _convert_one raise on episode 0002 only
+    from citizenry import dataset_v3_migrate
+    real_convert = dataset_v3_migrate._convert_one
+
+    def boom(legacy_dir, recorder, dry_run):
+        if "episode_0002" in str(legacy_dir):
+            raise RuntimeError("simulated corruption")
+        return real_convert(legacy_dir, recorder, dry_run)
+
+    monkeypatch.setattr(dataset_v3_migrate, "_convert_one", boom)
+
+    report = dataset_v3_migrate.migrate_legacy_to_v3(
+        [legacy_root], out_root, "test/local",
+        upload=False, delete_old=False, dry_run=False,
+    )
+    # Episodes 1 and 3 converted; episode 2 captured as error
+    assert report["episodes_converted"] == 2
+    assert len(report["errors"]) == 1
+    assert "episode_0002" in report["errors"][0]["path"]
+    assert "simulated corruption" in report["errors"][0]["error"]
