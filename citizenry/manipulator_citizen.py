@@ -8,8 +8,12 @@ v2.0: Task bidding, skill-gated execution, XP tracking, warning generation.
 
 import asyncio
 import time
+from pathlib import Path
+
+import numpy as np
 
 from .citizen import Citizen, Neighbor, Presence
+from .episode_recorder import EpisodeRecorderV3
 from .protocol import MessageType, make_envelope
 from .marketplace import compute_bid_score, Task
 from .skills import default_manipulator_skills
@@ -22,7 +26,7 @@ MOTOR_NAMES = [
 ]
 
 
-class PiCitizen(Citizen):
+class ManipulatorCitizen(Citizen):
     """Manipulation citizen on the Raspberry Pi 5.
 
     Responsibilities:
@@ -64,6 +68,23 @@ class PiCitizen(Citizen):
         self.skill_tree.merge_definitions(default_manipulator_skills())
         self._current_task_id: str | None = None
         self._current_task_type: str | None = None
+
+        # Episode recorder v3 — constructed when the law says "v3" or "both".
+        # _law() returns the default ("v3") when no constitution has been ratified.
+        self._recorder_v3: EpisodeRecorderV3 | None = None
+        fmt = self._law("episode_recorder_format", default="v3")
+        if fmt in ("v3", "both"):
+            self._recorder_v3 = EpisodeRecorderV3(
+                output_root=Path.home() / "citizenry-datasets" / "v3",
+                repo_id=self._law("dataset.hf_repo_id", default="local/citizenry-data"),
+                fps=int(self._law("dataset.fps", default=30)),
+            )
+            self._recorder_v3.set_attribution(
+                node_pubkey=self.node_pubkey,
+                policy_pubkey=getattr(self, "_active_policy_pubkey", None),
+                governor_pubkey=getattr(self, "governor_pubkey", None),
+                constitution_hash=getattr(self, "constitution_hash", None),
+            )
 
     async def start(self):
         await super().start()
@@ -121,6 +142,29 @@ class PiCitizen(Citizen):
             save_constitution(self.name, constitution)
         except Exception:
             pass
+
+        # Re-read episode_recorder_format law and (re-)initialize v3 recorder
+        # after constitution ratification, in case the law changed.
+        fmt = self._law("episode_recorder_format", default="v3")
+        if fmt in ("v3", "both"):
+            if self._recorder_v3 is None:
+                self._recorder_v3 = EpisodeRecorderV3(
+                    output_root=Path.home() / "citizenry-datasets" / "v3",
+                    repo_id=self._law("dataset.hf_repo_id", default="local/citizenry-data"),
+                    fps=int(self._law("dataset.fps", default=30)),
+                )
+            self._recorder_v3.set_attribution(
+                node_pubkey=self.node_pubkey,
+                policy_pubkey=getattr(self, "_active_policy_pubkey", None),
+                governor_pubkey=getattr(self, "governor_pubkey", None),
+                constitution_hash=getattr(self, "constitution_hash", None),
+            )
+        else:
+            # Law changed to v1-only; retire the v3 recorder (close any open episode first)
+            if self._recorder_v3 is not None and self._recorder_v3._open_episode_id is not None:
+                self._recorder_v3.close_episode(success=False, notes="recorder retired by law change")
+            if fmt == "v1":
+                self._recorder_v3 = None
 
         # Report back that we applied it
         if self._governor_key and self._governor_addr:
@@ -789,11 +833,14 @@ class PiCitizen(Citizen):
         t0 = time.time()
 
         # Begin episode recording with camera
+        episode_task = f"{task_type}/{params.get('gesture', '')}".rstrip('/')
         self.episode_recorder.begin_episode(
-            f"{task_type}/{params.get('gesture', '')}".rstrip('/'),
+            episode_task,
             params=params,
             camera_index=0,  # Try to use camera on Pi
         )
+        if self._recorder_v3 is not None:
+            self._recorder_v3.begin_episode(episode_task, params=params)
 
         try:
             self._log(f"executing task: [{task_id}] {task_type}")
@@ -807,6 +854,18 @@ class PiCitizen(Citizen):
                 joint_currents=currents,
                 reward=0.0,
             )
+            if self._recorder_v3 is not None:
+                self._recorder_v3.record_frame(
+                    frame_index=0,
+                    timestamp=0.0,
+                    image=np.zeros((96, 128, 3), dtype=np.uint8),
+                    joint_positions=list(positions.values()) if isinstance(positions, dict) else (positions or []),
+                    joint_currents=currents or [],
+                    joint_temperatures=[],
+                    joint_loads=[],
+                    action_positions=list(positions.values()) if isinstance(positions, dict) else (positions or []),
+                    reward=0.0,
+                )
 
             if task_type == "basic_gesture":
                 await self._exec_gesture(params)
@@ -826,6 +885,21 @@ class PiCitizen(Citizen):
                 joint_currents=final_currents,
                 reward=1.0,
             )
+            if self._recorder_v3 is not None:
+                fp_list = list(final_positions.values()) if isinstance(final_positions, dict) else (final_positions or [])
+                v3_frame_idx = len(self._recorder_v3._open_frames)
+                v3_ts = (time.time() - t0)
+                self._recorder_v3.record_frame(
+                    frame_index=v3_frame_idx,
+                    timestamp=v3_ts,
+                    image=np.zeros((96, 128, 3), dtype=np.uint8),
+                    joint_positions=fp_list,
+                    joint_currents=final_currents or [],
+                    joint_temperatures=[],
+                    joint_loads=[],
+                    action_positions=fp_list,
+                    reward=1.0,
+                )
 
             duration_ms = int((time.time() - t0) * 1000)
             skill_name = task_type if task_type in self.skill_tree.definitions else "basic_movement"
@@ -838,6 +912,12 @@ class PiCitizen(Citizen):
                 notes=f"{task_type} {duration_ms}ms +{xp_earned}XP",
                 final_reward=1.0,
             )
+            if self._recorder_v3 is not None:
+                self._recorder_v3.close_episode(
+                    success=True,
+                    notes=f"{task_type} {duration_ms}ms +{xp_earned}XP",
+                    duration_s=duration_ms / 1000.0,
+                )
 
             self.send_report(
                 governor_key,
@@ -857,6 +937,8 @@ class PiCitizen(Citizen):
         except Exception as e:
             self._log(f"task failed: [{task_id}] {e}")
             self.episode_recorder.end_episode(success=False, notes=str(e))
+            if self._recorder_v3 is not None and self._recorder_v3._open_episode_id is not None:
+                self._recorder_v3.close_episode(success=False, notes=str(e))
             self.send_report(
                 governor_key,
                 {
@@ -993,6 +1075,21 @@ class PiCitizen(Citizen):
                     action_positions=pose,
                     reward=0.5,
                 )
+                if self._recorder_v3 is not None and self._recorder_v3._open_episode_id is not None:
+                    actual_list = list(actual.values()) if isinstance(actual, dict) and actual else list(pose.values())
+                    pose_list = list(pose.values())
+                    v3_idx = len(self._recorder_v3._open_frames)
+                    self._recorder_v3.record_frame(
+                        frame_index=v3_idx,
+                        timestamp=float(i) / steps * duration,
+                        image=np.zeros((96, 128, 3), dtype=np.uint8),
+                        joint_positions=actual_list,
+                        joint_currents=[],
+                        joint_temperatures=[],
+                        joint_loads=[],
+                        action_positions=pose_list,
+                        reward=0.5,
+                    )
 
             await asyncio.sleep(duration / steps)
 

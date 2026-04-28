@@ -200,6 +200,11 @@ def default_constitution() -> Constitution:
             description="Seconds between heartbeat pings.",
             params={"seconds": 2.0},
         ),
+        Law(
+            id="episode_recorder_format",
+            description="Which episode recorder version is active: v1, v3, or both (transition).",
+            params={"value": "v3"},
+        ),
     ]
 
     return Constitution(

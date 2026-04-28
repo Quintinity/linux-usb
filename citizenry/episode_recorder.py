@@ -399,3 +399,226 @@ def get_episode_summary(episode_id: int) -> str:
         parts.append(f"Notes: {meta['notes']}")
 
     return "\n".join(parts)
+
+
+# ── LeRobotDataset v3 writer ──────────────────────────────────────────────────
+
+import uuid
+from datetime import datetime, timezone
+
+
+class EpisodeRecorderV3:
+    """Records episodes directly into a LeRobotDataset v3-style layout.
+
+    Output layout (rooted at output_root):
+        output_root/<repo_safe>/
+          data/chunk_NNN/episode_*.parquet
+          data/chunk_NNN/episode_*.json
+          videos/chunk_NNN/episode_*_<cam>.mp4
+          attribution.json   <- per-recorder sidecar
+
+    On close_episode(), Parquet+MP4 chunks are finalized; HFUploader
+    (Task 6) detects new content via output_root mtime and uploads.
+    """
+
+    MOTOR_NAMES = MOTOR_NAMES  # reuse module-level constant
+
+    def __init__(
+        self,
+        output_root,           # Path | str
+        repo_id: str = "local/citizenry-data",
+        fps: int = 30,
+        camera_names: tuple = ("base",),
+    ):
+        self.output_root = Path(output_root)
+        self.repo_id = repo_id
+        self.fps = int(fps)
+        self.camera_names = tuple(camera_names)
+        self.output_root.mkdir(parents=True, exist_ok=True)
+        self._open_episode_id: str | None = None
+        self._open_frames: list = []
+        self._open_task: str = ""
+        self._open_params: dict = {}
+        self._open_started_at: str = ""
+        self.last_episode_dir = None
+        # Attribution sidecar fields:
+        self._attribution: dict = {}
+
+    def set_attribution(
+        self,
+        node_pubkey: str,
+        policy_pubkey: str | None = None,
+        governor_pubkey: str | None = None,
+        constitution_hash: str | None = None,
+    ) -> None:
+        self._attribution = {
+            "node_pubkey": node_pubkey,
+            "policy_pubkey": policy_pubkey,
+            "governor_pubkey": governor_pubkey,
+            "constitution_hash": constitution_hash,
+        }
+
+    def begin_episode(self, task: str, params: dict) -> str:
+        if self._open_episode_id is not None:
+            raise RuntimeError(
+                f"begin_episode while episode {self._open_episode_id} is open"
+            )
+        self._open_episode_id = uuid.uuid4().hex[:12]
+        self._open_frames = []
+        self._open_task = task
+        self._open_params = params or {}
+        self._open_started_at = datetime.now(timezone.utc).isoformat()
+        return self._open_episode_id
+
+    def record_frame(
+        self,
+        frame_index: int,
+        timestamp: float,
+        image,            # np.ndarray HxWx3 uint8 (one camera for now)
+        joint_positions,
+        joint_currents,
+        joint_temperatures,
+        joint_loads,
+        action_positions,
+        reward: float = 0.0,
+        done: bool = False,
+        camera_name: str = "base",
+    ) -> None:
+        if self._open_episode_id is None:
+            raise RuntimeError("record_frame without begin_episode")
+        self._open_frames.append({
+            "frame_index": frame_index,
+            "timestamp": float(timestamp),
+            "image": image,
+            "camera_name": camera_name,
+            "observation.state": list(joint_positions),
+            "observation.current": list(joint_currents),
+            "observation.temperature": list(joint_temperatures),
+            "observation.load": list(joint_loads),
+            "action": list(action_positions),
+            "reward": float(reward),
+            "done": bool(done),
+        })
+
+    def close_episode(
+        self,
+        success: bool,
+        notes: str = "",
+        reward_total: float = 0.0,
+        duration_s: float = 0.0,
+    ):
+        if self._open_episode_id is None:
+            raise RuntimeError("close_episode without begin_episode")
+        eid = self._open_episode_id
+        out = self._write_chunk(
+            eid=eid,
+            frames=self._open_frames,
+            task=self._open_task,
+            params=self._open_params,
+            success=success,
+            notes=notes,
+            reward_total=reward_total,
+            duration_s=duration_s,
+            started_at=self._open_started_at,
+        )
+        # Write attribution sidecar at the per-repo root (NOT the chunk dir
+        # — sidecar is shared across chunks).
+        if self._attribution:
+            repo_safe = self.repo_id.replace("/", "__")
+            sidecar = self.output_root / repo_safe / "attribution.json"
+            sidecar.parent.mkdir(parents=True, exist_ok=True)
+            sidecar.write_text(json.dumps(self._attribution, indent=2))
+        self.last_episode_dir = out
+        # Reset open-episode state
+        self._open_episode_id = None
+        self._open_frames = []
+        return out
+
+    # ---- internal ----
+
+    def _write_chunk(
+        self,
+        eid: str,
+        frames,
+        task: str,
+        params: dict,
+        success: bool,
+        notes: str,
+        reward_total: float,
+        duration_s: float,
+        started_at: str,
+    ):
+        """Write one episode as a v3 chunk under output_root/<repo_safe>/."""
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        # Build the table
+        if not frames:
+            cols = {
+                "frame_index": [],
+                "timestamp": [],
+                "observation.state": [],
+                "observation.current": [],
+                "observation.temperature": [],
+                "observation.load": [],
+                "action": [],
+                "reward": [],
+                "done": [],
+            }
+        else:
+            cols = {k: [f[k] for f in frames]
+                    for k in (
+                        "frame_index", "timestamp",
+                        "observation.state", "observation.current",
+                        "observation.temperature", "observation.load",
+                        "action", "reward", "done",
+                    )}
+        table = pa.table(cols)
+        repo_safe = self.repo_id.replace("/", "__")
+        chunk_idx = self._next_chunk_index(repo_safe)
+        chunk_dir = self.output_root / repo_safe / "data" / f"chunk_{chunk_idx:03d}"
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+        parquet_path = chunk_dir / f"episode_{eid}.parquet"
+        pq.write_table(table, parquet_path)
+        # MP4 per camera (only "base" camera is wired here; multi-camera
+        # extension lands in Task 8 enhancement / PolicyCitizen integration)
+        video_root = self.output_root / repo_safe / "videos" / f"chunk_{chunk_idx:03d}"
+        video_root.mkdir(parents=True, exist_ok=True)
+        if frames:
+            self._write_mp4(
+                path=video_root / f"episode_{eid}_base.mp4",
+                images=[f["image"] for f in frames],
+            )
+        # Per-episode metadata (chunk-level, not dataset-level)
+        meta_path = chunk_dir / f"episode_{eid}.json"
+        meta_path.write_text(json.dumps({
+            "episode_id": eid,
+            "task": task,
+            "params": params,
+            "success": success,
+            "notes": notes,
+            "reward_total": reward_total,
+            "duration_s": duration_s,
+            "started_at": started_at,
+            "frame_count": len(frames),
+        }, indent=2))
+        return chunk_dir
+
+    def _next_chunk_index(self, repo_safe: str) -> int:
+        d = self.output_root / repo_safe / "data"
+        if not d.exists():
+            return 0
+        existing = sorted(d.glob("chunk_*"))
+        return len(existing)
+
+    def _write_mp4(self, path, images) -> None:
+        import cv2
+        if not images:
+            return
+        h, w = images[0].shape[:2]
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(path), fourcc, self.fps, (w, h))
+        try:
+            for img in images:
+                writer.write(img)
+        finally:
+            writer.release()
