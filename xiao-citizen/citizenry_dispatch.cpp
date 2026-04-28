@@ -28,6 +28,12 @@ static bool is_known_type(int t) {
 }
 
 DispatchResult Dispatcher::deliver(const std::string& wire_bytes) {
+    return deliver(wire_bytes, /*source_ip=*/0, /*source_port=*/0);
+}
+
+DispatchResult Dispatcher::deliver(const std::string& wire_bytes,
+                                   uint32_t source_ip,
+                                   uint16_t source_port) {
     Envelope env;
     if (!envelope_from_wire(wire_bytes, env)) {
         return DispatchResult::DropMalformed;
@@ -69,6 +75,8 @@ DispatchResult Dispatcher::deliver(const std::string& wire_bytes) {
         m.timestamp = env.timestamp;
         m.ttl       = env.ttl;
         m.body      = env.body;
+        m.source_ip   = source_ip;
+        m.source_port = source_port;
         _handler(m);
     }
     return DispatchResult::Delivered;

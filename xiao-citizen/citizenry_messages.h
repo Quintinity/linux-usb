@@ -20,6 +20,7 @@
 #include "citizenry_identity.h"
 #include <cstdint>
 #include <string>
+#include <vector>
 
 // MessageType enum mirror — kept here (rather than included from a shared
 // header) because the dispatcher already validates 1..7 and the sketch
@@ -95,6 +96,79 @@ std::string build_report_govern_ack(const Identity& id,
                                     int constitution_version,
                                     const std::string& governor_pubkey_hex,
                                     double now_unix_secs);
+
+// 3.1: ACCEPT_REJECT (unicast). Body: {result:"accept", task, task_id}.
+// Sent in response to a PROPOSE the citizen will execute. The proposer
+// uses task_id to correlate the eventual REPORT.
+std::string build_accept(const Identity& id,
+                         const std::string& proposer_pubkey_hex,
+                         const std::string& task,
+                         const std::string& task_id,
+                         double now_unix_secs);
+
+// 3.1: ACCEPT_REJECT (unicast). Body: {result:"reject", reason}.
+std::string build_reject(const Identity& id,
+                         const std::string& proposer_pubkey_hex,
+                         const std::string& reason,
+                         double now_unix_secs);
+
+// 3.2: REPORT frame_capture (unicast to proposer). Body:
+// {type:"frame_capture", task_id, frame_url, width, height, timestamp}.
+//
+// **Wire-format note:** the original Phase 3 plan called for an inline
+// base64 JPEG in body.frame matching the Pi-side proxy schema. Live
+// hardware verification revealed Arduino's WiFiUDP doesn't IP-fragment —
+// any payload >1460 B is silently split into multiple UDP datagrams,
+// none of which is a parseable envelope. Switching to a URL pointer
+// keeps REPORT one small UDP packet (under 500 B); the proposer fetches
+// the actual JPEG over TCP from the XIAO's HTTP /capture endpoint
+// (already exposed by app_httpd.cpp). Pi-side proxy still sends inline
+// frames; the harness handles both shapes.
+//
+// timestamp echoes now_unix_secs (XIAO has no RTC; Phase 4 SNTP fixes that).
+std::string build_report_frame_capture(const Identity& id,
+                                       const std::string& proposer_pubkey_hex,
+                                       const std::string& task_id,
+                                       const std::string& frame_url,
+                                       uint16_t width,
+                                       uint16_t height,
+                                       double now_unix_secs);
+
+// 3.3: hardware-abstract camera interface so the PROPOSE handler is host-
+// testable. The Arduino impl (XiaoCameraSource in xiao-citizen.ino) wraps
+// citizenry_camera_grab/release; host tests use a stub.
+class CameraSource {
+public:
+    virtual ~CameraSource() = default;
+    // grab() yields a JPEG buffer + dimensions. The pointer is borrowed and
+    // must remain valid until release() is called. Return false if the
+    // capture fails or the camera is not ready.
+    virtual bool grab(const uint8_t** out_buf, size_t* out_len,
+                      uint16_t* out_w, uint16_t* out_h) = 0;
+    virtual void release() = 0;
+    // ready() is the cheap "would grab() plausibly succeed" probe used to
+    // emit a fast REJECT before any frame buffer churn.
+    virtual bool ready() const = 0;
+};
+
+// 3.3: PROPOSE handler for task=="frame_capture". Returns vector of envelope
+// wire bytes to emit, in order. Always emits ACCEPT_REJECT (accept or reject)
+// first. On accept the second envelope is the REPORT frame_capture (or a
+// REPORT task_complete with result:"failed" if the actual capture failed
+// after we already accepted). Empty vector only on a non-PROPOSE inbound.
+struct FrameCaptureTarget {
+    std::string proposer_pubkey_hex;
+    uint16_t    reply_port = 0;
+    std::string task_id;
+};
+std::vector<std::string>
+handle_propose_frame_capture(const InboundEnvelope& m,
+                             const Identity& id,
+                             CameraSource& cam,
+                             uint16_t fallback_reply_port,
+                             double now_unix_secs,
+                             FrameCaptureTarget& out,
+                             const std::string& frame_base_url = "");
 
 // 2.6: persistence interface for the constitution (the GOVERN body). Hardware
 // implementation is NVS-backed (Preferences); the host tests use an in-memory

@@ -11,10 +11,11 @@
 namespace {
 
 // Default TTLs (seconds) — mirror citizenry/protocol.py constants.
-constexpr double TTL_HEARTBEAT = 6.0;
-constexpr double TTL_DISCOVER  = 5.0;
-constexpr double TTL_ADVERTISE = 30.0;
-constexpr double TTL_REPORT    = 60.0;
+constexpr double TTL_HEARTBEAT     = 6.0;
+constexpr double TTL_DISCOVER      = 5.0;
+constexpr double TTL_ADVERTISE     = 30.0;
+constexpr double TTL_REPORT        = 60.0;
+constexpr double TTL_ACCEPT_REJECT = 10.0;
 
 // Sign env in place, return wire bytes.
 std::string finalize(const Identity& id, Envelope& env) {
@@ -22,6 +23,10 @@ std::string finalize(const Identity& id, Envelope& env) {
     env.signature = id.sign_hex(canonical);
     return envelope_to_wire(env);
 }
+
+// (3.2's b64_encode was removed when REPORT frame_capture switched from inline
+// base64 JPEG to URL-pointer transport — UDP fragmentation made inline >MTU
+// payloads unreliable. See citizenry_messages.h for the rationale.)
 
 } // anon
 
@@ -144,6 +149,162 @@ std::string build_report_govern_ack(const Identity& id,
     env.body_set_string("result", "success");
     env.body_set_int("constitution_version", constitution_version);
     return finalize(id, env);
+}
+
+// 3.1: ACCEPT_REJECT (type 5). The body shape mirrors the Pi-side
+// CameraCitizen.send_accept / send_reject — proposer correlates by task_id.
+std::string build_accept(const Identity& id,
+                         const std::string& proposer_pubkey_hex,
+                         const std::string& task,
+                         const std::string& task_id,
+                         double now_unix_secs) {
+    Envelope env;
+    env.version   = 1;
+    env.type      = MsgType::ACCEPT_REJECT;
+    env.sender    = id.pubkey_hex();
+    env.recipient = proposer_pubkey_hex;
+    env.timestamp = now_unix_secs;
+    env.ttl       = TTL_ACCEPT_REJECT;
+    env.body_set_string("result", "accept");
+    env.body_set_string("task", task);
+    env.body_set_string("task_id", task_id);
+    return finalize(id, env);
+}
+
+std::string build_reject(const Identity& id,
+                         const std::string& proposer_pubkey_hex,
+                         const std::string& reason,
+                         double now_unix_secs) {
+    Envelope env;
+    env.version   = 1;
+    env.type      = MsgType::ACCEPT_REJECT;
+    env.sender    = id.pubkey_hex();
+    env.recipient = proposer_pubkey_hex;
+    env.timestamp = now_unix_secs;
+    env.ttl       = TTL_ACCEPT_REJECT;
+    env.body_set_string("result", "reject");
+    env.body_set_string("reason", reason);
+    return finalize(id, env);
+}
+
+// 3.2: REPORT frame_capture. The body is the same shape Pi-side
+// CameraCitizen.send_report_frame_capture emits, so a Surface harness or
+// any other proposer can correlate by task_id without protocol changes.
+std::string build_report_frame_capture(const Identity& id,
+                                       const std::string& proposer_pubkey_hex,
+                                       const std::string& task_id,
+                                       const std::string& frame_url,
+                                       uint16_t width,
+                                       uint16_t height,
+                                       double now_unix_secs) {
+    Envelope env;
+    env.version   = 1;
+    env.type      = MsgType::REPORT;
+    env.sender    = id.pubkey_hex();
+    env.recipient = proposer_pubkey_hex;
+    env.timestamp = now_unix_secs;
+    env.ttl       = TTL_REPORT;
+    env.body_set_string("type", "frame_capture");
+    env.body_set_string("task_id", task_id);
+    env.body_set_string("frame_url", frame_url);
+    env.body_set_int("width",  width);
+    env.body_set_int("height", height);
+    // XIAO has no RTC, so this is seconds-since-boot when called from the
+    // Arduino path. Phase 4 SNTP will replace with wallclock.
+    env.body_set_double("timestamp", now_unix_secs);
+    return finalize(id, env);
+}
+
+// 3.3: PROPOSE handler. Splits hardware concerns out via CameraSource so
+// the host tests don't pull esp_camera. Caveat: the dispatcher hasn't been
+// extended to plumb source IP through InboundEnvelope yet (Phase 4) so the
+// caller in the sketch unicasts via multicast — recipient pubkey filtering
+// keeps it correct, just noisier.
+std::vector<std::string>
+handle_propose_frame_capture(const InboundEnvelope& m,
+                             const Identity& id,
+                             CameraSource& cam,
+                             uint16_t fallback_reply_port,
+                             double now_unix_secs,
+                             FrameCaptureTarget& out,
+                             const std::string& frame_base_url) {
+    std::vector<std::string> result;
+    out.proposer_pubkey_hex.clear();
+    out.reply_port = 0;
+    out.task_id.clear();
+
+    if (m.type != MsgType::PROPOSE) return result;
+    if (m.sender.empty())            return result;
+
+    // Pull task / task_id from the body. body shape:
+    //   {task: "frame_capture", task_id: "..."}
+    std::string task, task_id;
+    auto it_task = m.body.find("task");
+    if (it_task != m.body.end() && it_task->second.kind == JsonValue::String)
+        task = it_task->second.s;
+    auto it_tid = m.body.find("task_id");
+    if (it_tid != m.body.end() && it_tid->second.kind == JsonValue::String)
+        task_id = it_tid->second.s;
+
+    out.proposer_pubkey_hex = m.sender;
+    out.reply_port          = fallback_reply_port;
+    out.task_id             = task_id;
+
+    if (task != "frame_capture") {
+        result.push_back(build_reject(id, m.sender,
+                                      "unknown task: " + task,
+                                      now_unix_secs));
+        return result;
+    }
+    if (!cam.ready()) {
+        result.push_back(build_reject(id, m.sender,
+                                      "camera not available",
+                                      now_unix_secs));
+        return result;
+    }
+
+    // Commit to the work — emit ACCEPT first so the proposer's state machine
+    // doesn't time out while we grab/encode (~50–200 ms on hardware).
+    result.push_back(build_accept(id, m.sender, "frame_capture",
+                                  task_id, now_unix_secs));
+
+    // Probe the camera by grabbing one frame — proves the sensor is healthy
+    // at this moment, capture dimensions for the REPORT body, and immediately
+    // release. The actual JPEG bytes ride out via TCP on the HTTP /capture
+    // endpoint when the proposer fetches frame_url.
+    const uint8_t* buf = nullptr;
+    size_t         len = 0;
+    uint16_t       w = 0, h = 0;
+    if (!cam.grab(&buf, &len, &w, &h)) {
+        // Capture failed AFTER we accepted. Keep the ACCEPT, attach a
+        // failure REPORT so the proposer's state machine resolves cleanly
+        // (rather than waiting out a TTL).
+        Envelope env;
+        env.version   = 1;
+        env.type      = MsgType::REPORT;
+        env.sender    = id.pubkey_hex();
+        env.recipient = m.sender;
+        env.timestamp = now_unix_secs;
+        env.ttl       = TTL_REPORT;
+        env.body_set_string("type",    "task_complete");
+        env.body_set_string("task_id", task_id);
+        env.body_set_string("result",  "failed");
+        env.body_set_string("reason",  "frame capture failed");
+        result.push_back(finalize(id, env));
+        cam.release();
+        return result;
+    }
+    cam.release();
+    // Tell the proposer where to fetch the live frame. base_url is the
+    // citizen's HTTP root (e.g. "http://192.168.1.83"); /capture is the
+    // standard CameraWebServer endpoint already wired in app_httpd.cpp.
+    std::string frame_url = frame_base_url.empty()
+                          ? std::string("/capture")
+                          : (frame_base_url + "/capture");
+    result.push_back(build_report_frame_capture(id, m.sender, task_id,
+                                                frame_url, w, h,
+                                                now_unix_secs));
+    return result;
 }
 
 // Re-emit a sub-tree of the body in canonical form so we cache the exact bytes

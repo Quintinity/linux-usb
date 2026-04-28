@@ -12,11 +12,20 @@
 #include "esp_camera.h"
 #include "board_config.h"
 #include "camera_pins.h"
+#include "citizenry_camera.h"
+#include "citizenry_camera.h"
 #include "citizenry_constitution_store.h"
 #include "citizenry_dispatch.h"
 #include "citizenry_identity.h"
 #include "citizenry_messages.h"
 #include "citizenry_transport.h"
+
+// Defined in app_httpd.cpp — starts the legacy CameraWebServer on :80
+// (/index, /capture, /status, ...) and the streaming server on :81.
+// Must be called after WiFi joins and citizenry_camera_begin() succeeds;
+// the registered URI handlers use the same mutexed grab API the citizenry
+// path uses, so concurrent /capture and PROPOSE→REPORT requests are safe.
+extern void startCameraServer();
 
 // ===== build-time configuration =====
 static const char* WIFI_SSID = "Bradley-Starlink";
@@ -49,6 +58,29 @@ static Dispatcher                     g_dispatcher;
 static PreferencesConstitutionStore   g_constitution;
 static HeartbeatScheduler             g_heartbeat;
 static uint32_t                       g_boot_ms = 0;
+
+// 3.4: thin Arduino adapter that lets handle_propose_frame_capture call
+// the mutex'd OV2640 grab without dragging esp_camera into the host tests.
+class XiaoCameraSource : public CameraSource {
+public:
+    bool grab(const uint8_t** b, size_t* l, uint16_t* w, uint16_t* h) override {
+        _fb = citizenry_camera_grab(/*timeout_ms=*/1000);
+        if (!_fb) return false;
+        *b = _fb->buf;
+        *l = _fb->len;
+        *w = citizenry_camera_width();
+        *h = citizenry_camera_height();
+        return true;
+    }
+    void release() override {
+        if (_fb) { citizenry_camera_release(_fb); _fb = nullptr; }
+    }
+    bool ready() const override { return citizenry_camera_ready(); }
+private:
+    camera_fb_t* _fb = nullptr;
+};
+static XiaoCameraSource g_camera_src;
+
 // The reply port we ask the governor to use for the ack envelope. UDP is
 // connectionless so the governor will actually reply to the *source* port
 // of our outbound REPORT (i.e. our unicast socket); we still set this so
@@ -73,6 +105,24 @@ void setup() {
     while (WiFi.status() != WL_CONNECTED && tries < 60) { delay(500); Serial.print('.'); tries++; }
     if (WiFi.status() != WL_CONNECTED) { Serial.println(" FAILED"); return; }
     Serial.printf("\nIP: %s\n", WiFi.localIP().toString().c_str());
+
+    // Camera — Phase 3.0 wires the OV2640 lifecycle behind a mutex so the
+    // legacy http /capture path and the citizenry PROPOSE→REPORT path can
+    // coexist. Failure here is non-fatal: PROPOSE handlers will REJECT.
+    if (!citizenry_camera_begin()) {
+        Serial.println("camera_begin FAILED — frame_capture will REJECT");
+    } else {
+        Serial.printf("camera ready %ux%u jpg\n",
+                      (unsigned)citizenry_camera_width(),
+                      (unsigned)citizenry_camera_height());
+        // Start the legacy CameraWebServer on :80 (and stream on :81). The
+        // PROPOSE→REPORT frame_capture path returns a frame_url pointing at
+        // the /capture endpoint — Arduino's WiFiUDP can't IP-fragment, so
+        // sending a 30 KB JPEG inline over UDP fails silently. TCP via this
+        // endpoint delivers reliably.
+        startCameraServer();
+        Serial.println("camera HTTP server up on :80 (/capture, /stream:81)");
+    }
 
     // Identity
     if (!g_identity.load_from_nvs()) {
@@ -127,17 +177,49 @@ void setup() {
                 Serial.println("[discover] advertised");
                 break;
             }
+            case MsgType::PROPOSE: {
+                FrameCaptureTarget tgt;
+                // Tell the handler the URL prefix (http://<our_ip>) so the
+                // REPORT body advertises the right /capture endpoint. The
+                // proposer fetches the JPEG over TCP — see citizenry_messages.h
+                // build_report_frame_capture comment for why we don't inline
+                // the JPEG over UDP.
+                std::string base_url = std::string("http://") +
+                    std::string(WiFi.localIP().toString().c_str());
+                auto envs = handle_propose_frame_capture(
+                    m, g_identity, g_camera_src,
+                    g_unicast_port, (double)time(nullptr), tgt, base_url);
+                // REPORT envelopes routinely exceed Ethernet MTU once the
+                // base64'd JPEG is in the body (~30 KB). UDP multicast over
+                // WiFi drops fragmented packets unreliably, so we unicast
+                // every reply to the proposer's actual transport-layer
+                // source — which Phase 4 source-IP plumbing made available
+                // on InboundEnvelope. Falls back to multicast if the
+                // dispatcher didn't capture a source (host tests, replays).
+                IPAddress dst(m.source_ip);
+                uint16_t  dst_port = m.source_port;
+                bool can_unicast = (m.source_ip != 0 && dst_port != 0);
+                for (const auto& e : envs) {
+                    if (can_unicast) g_xport.send_unicast(e, dst, dst_port);
+                    else             g_xport.send_multicast(e);
+                }
+                Serial.printf("[propose] task_id=%s emitted=%u via %s\n",
+                              tgt.task_id.c_str(), (unsigned)envs.size(),
+                              can_unicast ? "unicast" : "multicast");
+                break;
+            }
             default:
                 Serial.printf("[recv envelope type=%d]\n", m.type);
                 break;
         }
     });
 
-    bool xport_ok = g_xport.begin([](const std::string& bytes, IPAddress /*ip*/, uint16_t /*port*/) {
+    bool xport_ok = g_xport.begin([](const std::string& bytes, IPAddress ip, uint16_t port) {
         // Drop everything into the dispatcher; it parses, verifies, and
         // routes. The per-message logging happens inside the type switch.
+        // Source IP/port are plumbed through so PROPOSE→REPORT can unicast.
         g_dispatcher.set_now((double)time(nullptr));
-        DispatchResult r = g_dispatcher.deliver(bytes);
+        DispatchResult r = g_dispatcher.deliver(bytes, (uint32_t)ip, port);
         if (r != DispatchResult::Delivered) {
             Serial.printf("[drop %s]\n", dispatch_result_name(r));
         }
