@@ -215,6 +215,26 @@ def default_constitution() -> Constitution:
             description="Frames per second for v3 dataset videos.",
             params={"value": 30},
         ),
+        Law(
+            id="dataset.upload_after_episode",
+            description="Whether ManipulatorCitizen uploads each closed episode to HF.",
+            params={"value": True},
+        ),
+        Law(
+            id="dataset.delete_after_upload",
+            description="Whether to delete local episodes after verified HF upload.",
+            params={"value": True},
+        ),
+        Law(
+            id="dataset.retry_interval_s",
+            description="Seconds between HFUploader retry attempts.",
+            params={"value": 300},
+        ),
+        Law(
+            id="dataset.max_local_episodes",
+            description="Soft cap on local episode count before uploads-lagging warning.",
+            params={"value": 50},
+        ),
     ]
 
     return Constitution(

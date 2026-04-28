@@ -85,6 +85,11 @@ class ManipulatorCitizen(Citizen):
                 constitution_hash=getattr(self, "constitution_hash", None),
             )
 
+        # HF uploader — enabled when dataset.hf_repo_id is set and
+        # dataset.upload_after_episode is True (both default to disabled/True).
+        self._uploader = None
+        self._uploader_task: asyncio.Task | None = None
+
     async def start(self):
         await super().start()
         # Pre-connect the follower bus
@@ -93,6 +98,26 @@ class ManipulatorCitizen(Citizen):
             self._log(f"follower arm ready on {self.follower_port}")
         else:
             self._log("follower arm init failed — will retry on teleop start")
+
+        # Start HF upload watcher if configured.
+        if self._law("dataset.upload_after_episode", default=True):
+            repo_id = self._law("dataset.hf_repo_id", default="")
+            if repo_id and self._recorder_v3 is not None:
+                from .hf_upload import HFUploader
+                delete = self._law("dataset.delete_after_upload", default=True)
+                cap = int(self._law("dataset.max_local_episodes", default=50))
+                retry_interval = float(self._law("dataset.retry_interval_s", default=300))
+                self._uploader = HFUploader(repo_id=repo_id)
+                dataset_root = self._recorder_v3.output_root
+                self._uploader_task = asyncio.get_event_loop().create_task(
+                    self._uploader.watch(
+                        dataset_root,
+                        poll_interval=retry_interval,
+                        delete_on_success=delete,
+                        cap_local_episodes=cap,
+                    )
+                )
+                self._log(f"HF uploader started → {repo_id} (delete={delete}, cap={cap})")
 
     def _on_neighbor_joined(self, neighbor: Neighbor):
         """Track the governor."""
@@ -1127,4 +1152,11 @@ class ManipulatorCitizen(Citizen):
                 self._follower_bus.disconnect()
             except Exception:
                 pass
+        if self._uploader_task is not None:
+            self._uploader_task.cancel()
+            try:
+                await self._uploader_task
+            except asyncio.CancelledError:
+                pass
+            self._uploader_task = None
         await super().stop()
