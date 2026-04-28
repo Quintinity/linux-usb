@@ -46,21 +46,22 @@ sk = nacl.signing.SigningKey.generate()
 me_pubkey = sk.verify_key.encode(encoder=nacl.encoding.HexEncoder).decode()
 print(f"test driver pubkey: {me_pubkey[:16]}...")
 
-# --- listener ---
+# --- single socket for tx + rx ---
+# We use the same socket to send PROPOSE (multicast) and receive both the
+# multicast HEARTBEAT stream AND the unicast ACCEPT/REPORT replies. The
+# XIAO's Phase 4 source-IP-aware dispatcher unicasts replies to whatever
+# port we sent the PROPOSE from, so tx-port == rx-port is essential.
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 sock.bind(("", MULTICAST_PORT))
 mreq = struct.pack("4sl", socket.inet_aton(MULTICAST_GROUP), socket.INADDR_ANY)
 sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
 sock.settimeout(0.5)
-
-# --- sender ---
-tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-tx.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
 
 
 def send_mcast(env: Envelope) -> None:
-    tx.sendto(env.to_bytes(), (MULTICAST_GROUP, MULTICAST_PORT))
+    sock.sendto(env.to_bytes(), (MULTICAST_GROUP, MULTICAST_PORT))
 
 
 # ============ STEP 1: learn the XIAO's pubkey from a heartbeat ============
@@ -151,10 +152,34 @@ try:
 except Exception as exc:  # noqa: BLE001
     print(f"  signature verify error: {exc!r}")
 
-# ============ STEP 5: decode + sanity-check the JPEG payload ============
-b64 = report_body["frame"]
-jpg = base64.b64decode(b64)
-print(f"\nJPEG size: {len(jpg)} B  ({report_body.get('width')}x{report_body.get('height')})")
+# ============ STEP 5: fetch + sanity-check the JPEG via TCP ============
+# REPORT carries frame_url (Phase 3 wire format pivot — see
+# citizenry_messages.h for why we don't inline base64 over UDP). The
+# proposer fetches the actual JPEG over TCP from the XIAO's HTTP /capture.
+# Falls back to the legacy inline `frame` field if a Pi-side proxy ever
+# sends one this way.
+import urllib.request
+
+def _fetch(url: str) -> bytes:
+    with urllib.request.urlopen(url, timeout=5) as r:
+        return r.read()
+
+frame_url = report_body.get("frame_url")
+b64 = report_body.get("frame")
+if frame_url:
+    print(f"\nfetching {frame_url} ...")
+    try:
+        jpg = _fetch(frame_url)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  HTTP fetch failed: {exc!r}")
+        sys.exit(6)
+elif b64:
+    jpg = base64.b64decode(b64)
+else:
+    print("  REPORT has neither frame_url nor frame; cannot recover JPEG")
+    sys.exit(7)
+
+print(f"  JPEG size: {len(jpg)} B  ({report_body.get('width')}x{report_body.get('height')})")
 if jpg[:2] != b"\xff\xd8":
     print(f"  bad SOI: first 4 bytes = {jpg[:4].hex()}")
     sys.exit(5)

@@ -457,16 +457,15 @@ int main() {
     }
 
     // ---- 3.2: build_report_frame_capture (REPORT type 6) ----
+    // Wire format pivoted from inline base64 JPEG to URL pointer once live
+    // hardware showed Arduino's WiFiUDP can't IP-fragment >1460 B payloads.
+    // Body now carries frame_url (TCP-fetched) + width/height/timestamp.
     {
         const std::string PROPOSER = std::string(64, 'd');
-        // Synthetic 6-byte JPEG-shaped payload — content opaque to the builder.
-        // base64 of {0xff,0xd8,0xff,0xe0,0xff,0xd9} == "/9j/4P/Z" (no padding;
-        // 6 bytes = 8 base64 chars, exact fit).
-        const uint8_t fake_jpg[] = {0xff, 0xd8, 0xff, 0xe0, 0xff, 0xd9};
+        const std::string URL = "http://192.168.1.83/capture";
         std::string wire = build_report_frame_capture(
             id, PROPOSER, /*task_id=*/"task-1",
-            fake_jpg, sizeof(fake_jpg),
-            /*width=*/320, /*height=*/240, NOW);
+            URL, /*width=*/320, /*height=*/240, NOW);
         check("frame_capture non-empty", !wire.empty());
 
         InboundEnvelope captured;
@@ -482,54 +481,25 @@ int main() {
               body_str(captured.body, "type") == "frame_capture");
         check("frame_capture body.task_id=task-1",
               body_str(captured.body, "task_id") == "task-1");
-        check("frame_capture body.frame == base64(input)",
-              body_str(captured.body, "frame") == "/9j/4P/Z");
+        check("frame_capture body.frame_url",
+              body_str(captured.body, "frame_url") == URL);
         check("frame_capture body.width=320",  body_int(captured.body, "width")  == 320);
         check("frame_capture body.height=240", body_int(captured.body, "height") == 240);
         check("frame_capture body.timestamp",  body_dbl(captured.body, "timestamp") == NOW);
     }
 
-    // ---- 3.2: b64 padding edge cases — 1-byte, 2-byte, 3-byte, larger ----
-    {
-        const std::string PROPOSER = std::string(64, 'e');
-        // 1 byte → 4 chars with two = pads. base64("M") == "TQ==".
-        const uint8_t one[]   = { 'M' };
-        // 2 bytes → 4 chars with one = pad. base64("Ma") == "TWE=".
-        const uint8_t two[]   = { 'M','a' };
-        // 3 bytes → 4 chars no pad. base64("Man") == "TWFu".
-        const uint8_t three[] = { 'M','a','n' };
-        struct Case { const uint8_t* b; size_t n; const char* expect; const char* name; };
-        Case cases[] = {
-            { one,   1, "TQ==", "b64 1-byte" },
-            { two,   2, "TWE=", "b64 2-byte" },
-            { three, 3, "TWFu", "b64 3-byte" },
-        };
-        for (const auto& c : cases) {
-            std::string wire = build_report_frame_capture(
-                id, PROPOSER, "tid", c.b, c.n, 1, 1, NOW);
-            InboundEnvelope cap;
-            Dispatcher disp;
-            disp.set_now(NOW);
-            disp.set_handler([&](const InboundEnvelope& m){ cap = m; });
-            check(std::string(c.name) + " delivered",
-                  disp.deliver(wire) == DispatchResult::Delivered);
-            check(std::string(c.name) + " encodes correctly",
-                  body_str(cap.body, "frame") == c.expect);
-        }
-    }
-
-    // ---- 3.2: empty payload encodes to empty string and still verifies ----
+    // ---- 3.2: empty URL is allowed (Phase 4 firmware may omit it) ----
     {
         const std::string PROPOSER = std::string(64, 'f');
         std::string wire = build_report_frame_capture(
-            id, PROPOSER, "empty", nullptr, 0, 0, 0, NOW);
+            id, PROPOSER, "noop", "", 0, 0, NOW);
         InboundEnvelope cap;
         Dispatcher disp;
         disp.set_now(NOW);
         disp.set_handler([&](const InboundEnvelope& m){ cap = m; });
-        check("empty payload delivered (sig verifies)",
+        check("empty URL delivered (sig verifies)",
               disp.deliver(wire) == DispatchResult::Delivered);
-        check("empty payload frame=''", body_str(cap.body, "frame") == "");
+        check("empty URL frame_url=''", body_str(cap.body, "frame_url") == "");
     }
 
     // ---- 3.3: handle_propose_frame_capture happy path ----
@@ -573,7 +543,8 @@ int main() {
         FrameCaptureTarget tgt;
         auto envs = handle_propose_frame_capture(inbound, id, cam,
                                                  /*fallback_reply_port=*/4242,
-                                                 NOW, tgt);
+                                                 NOW, tgt,
+                                                 /*frame_base_url=*/"http://10.0.0.99");
         check("propose: 2 envelopes returned", envs.size() == 2);
         // First: ACCEPT_REJECT accept
         InboundEnvelope a;
@@ -599,8 +570,8 @@ int main() {
               body_str(r.body, "type") == "frame_capture");
         check("propose: report body.task_id=task-7",
               body_str(r.body, "task_id") == "task-7");
-        check("propose: report body.frame matches b64",
-              body_str(r.body, "frame") == "/9gBAv/Z");
+        check("propose: report body.frame_url is base+/capture",
+              body_str(r.body, "frame_url") == "http://10.0.0.99/capture");
         check("propose: report body.width=320",  body_int(r.body, "width")  == 320);
         check("propose: report body.height=240", body_int(r.body, "height") == 240);
         // Both envelopes addressed to the proposer pubkey

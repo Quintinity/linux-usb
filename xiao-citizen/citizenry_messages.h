@@ -113,16 +113,23 @@ std::string build_reject(const Identity& id,
                          double now_unix_secs);
 
 // 3.2: REPORT frame_capture (unicast to proposer). Body:
-// {type:"frame_capture", task_id, frame:<base64 JPEG>, width, height,
-//  timestamp}. Mirrors citizenry/camera_citizen.py send_report_frame_capture.
-// `jpeg_buf` is base64-encoded into the body; ownership of the buffer stays
-// with the caller (the caller releases the camera FB after this returns).
+// {type:"frame_capture", task_id, frame_url, width, height, timestamp}.
+//
+// **Wire-format note:** the original Phase 3 plan called for an inline
+// base64 JPEG in body.frame matching the Pi-side proxy schema. Live
+// hardware verification revealed Arduino's WiFiUDP doesn't IP-fragment —
+// any payload >1460 B is silently split into multiple UDP datagrams,
+// none of which is a parseable envelope. Switching to a URL pointer
+// keeps REPORT one small UDP packet (under 500 B); the proposer fetches
+// the actual JPEG over TCP from the XIAO's HTTP /capture endpoint
+// (already exposed by app_httpd.cpp). Pi-side proxy still sends inline
+// frames; the harness handles both shapes.
+//
 // timestamp echoes now_unix_secs (XIAO has no RTC; Phase 4 SNTP fixes that).
 std::string build_report_frame_capture(const Identity& id,
                                        const std::string& proposer_pubkey_hex,
                                        const std::string& task_id,
-                                       const uint8_t* jpeg_buf,
-                                       size_t jpeg_len,
+                                       const std::string& frame_url,
                                        uint16_t width,
                                        uint16_t height,
                                        double now_unix_secs);
@@ -160,7 +167,8 @@ handle_propose_frame_capture(const InboundEnvelope& m,
                              CameraSource& cam,
                              uint16_t fallback_reply_port,
                              double now_unix_secs,
-                             FrameCaptureTarget& out);
+                             FrameCaptureTarget& out,
+                             const std::string& frame_base_url = "");
 
 // 2.6: persistence interface for the constitution (the GOVERN body). Hardware
 // implementation is NVS-backed (Preferences); the host tests use an in-memory

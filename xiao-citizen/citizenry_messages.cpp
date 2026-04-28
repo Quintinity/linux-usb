@@ -24,43 +24,9 @@ std::string finalize(const Identity& id, Envelope& env) {
     return envelope_to_wire(env);
 }
 
-// 3.2: minimal base64 encoder (standard alphabet, '=' padding). The Phase 3
-// REPORT frame_capture body carries an OV2640 JPEG (~10–20 KB at QVGA q=12);
-// the encoded string is ~4/3 of that and lives on the heap until the wire
-// envelope is serialised. Decoder side is Python's base64.b64decode which
-// expects canonical padding.
-constexpr char B64_ALPHABET[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-std::string b64_encode(const uint8_t* data, size_t len) {
-    std::string out;
-    out.reserve(((len + 2) / 3) * 4);
-    size_t i = 0;
-    for (; i + 3 <= len; i += 3) {
-        uint32_t v = ((uint32_t)data[i] << 16)
-                   | ((uint32_t)data[i+1] << 8)
-                   |  (uint32_t)data[i+2];
-        out.push_back(B64_ALPHABET[(v >> 18) & 0x3f]);
-        out.push_back(B64_ALPHABET[(v >> 12) & 0x3f]);
-        out.push_back(B64_ALPHABET[(v >>  6) & 0x3f]);
-        out.push_back(B64_ALPHABET[ v        & 0x3f]);
-    }
-    size_t rem = len - i;
-    if (rem == 1) {
-        uint32_t v = (uint32_t)data[i] << 16;
-        out.push_back(B64_ALPHABET[(v >> 18) & 0x3f]);
-        out.push_back(B64_ALPHABET[(v >> 12) & 0x3f]);
-        out.push_back('=');
-        out.push_back('=');
-    } else if (rem == 2) {
-        uint32_t v = ((uint32_t)data[i] << 16) | ((uint32_t)data[i+1] << 8);
-        out.push_back(B64_ALPHABET[(v >> 18) & 0x3f]);
-        out.push_back(B64_ALPHABET[(v >> 12) & 0x3f]);
-        out.push_back(B64_ALPHABET[(v >>  6) & 0x3f]);
-        out.push_back('=');
-    }
-    return out;
-}
+// (3.2's b64_encode was removed when REPORT frame_capture switched from inline
+// base64 JPEG to URL-pointer transport — UDP fragmentation made inline >MTU
+// payloads unreliable. See citizenry_messages.h for the rationale.)
 
 } // anon
 
@@ -227,8 +193,7 @@ std::string build_reject(const Identity& id,
 std::string build_report_frame_capture(const Identity& id,
                                        const std::string& proposer_pubkey_hex,
                                        const std::string& task_id,
-                                       const uint8_t* jpeg_buf,
-                                       size_t jpeg_len,
+                                       const std::string& frame_url,
                                        uint16_t width,
                                        uint16_t height,
                                        double now_unix_secs) {
@@ -241,7 +206,7 @@ std::string build_report_frame_capture(const Identity& id,
     env.ttl       = TTL_REPORT;
     env.body_set_string("type", "frame_capture");
     env.body_set_string("task_id", task_id);
-    env.body_set_string("frame", b64_encode(jpeg_buf, jpeg_len));
+    env.body_set_string("frame_url", frame_url);
     env.body_set_int("width",  width);
     env.body_set_int("height", height);
     // XIAO has no RTC, so this is seconds-since-boot when called from the
@@ -261,7 +226,8 @@ handle_propose_frame_capture(const InboundEnvelope& m,
                              CameraSource& cam,
                              uint16_t fallback_reply_port,
                              double now_unix_secs,
-                             FrameCaptureTarget& out) {
+                             FrameCaptureTarget& out,
+                             const std::string& frame_base_url) {
     std::vector<std::string> result;
     out.proposer_pubkey_hex.clear();
     out.reply_port = 0;
@@ -302,6 +268,10 @@ handle_propose_frame_capture(const InboundEnvelope& m,
     result.push_back(build_accept(id, m.sender, "frame_capture",
                                   task_id, now_unix_secs));
 
+    // Probe the camera by grabbing one frame — proves the sensor is healthy
+    // at this moment, capture dimensions for the REPORT body, and immediately
+    // release. The actual JPEG bytes ride out via TCP on the HTTP /capture
+    // endpoint when the proposer fetches frame_url.
     const uint8_t* buf = nullptr;
     size_t         len = 0;
     uint16_t       w = 0, h = 0;
@@ -324,10 +294,16 @@ handle_propose_frame_capture(const InboundEnvelope& m,
         cam.release();
         return result;
     }
-    result.push_back(build_report_frame_capture(id, m.sender, task_id,
-                                                buf, len, w, h,
-                                                now_unix_secs));
     cam.release();
+    // Tell the proposer where to fetch the live frame. base_url is the
+    // citizen's HTTP root (e.g. "http://192.168.1.83"); /capture is the
+    // standard CameraWebServer endpoint already wired in app_httpd.cpp.
+    std::string frame_url = frame_base_url.empty()
+                          ? std::string("/capture")
+                          : (frame_base_url + "/capture");
+    result.push_back(build_report_frame_capture(id, m.sender, task_id,
+                                                frame_url, w, h,
+                                                now_unix_secs));
     return result;
 }
 

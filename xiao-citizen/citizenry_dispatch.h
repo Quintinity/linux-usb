@@ -17,6 +17,7 @@
 #include "citizenry_envelope.h"
 
 #include <functional>
+#include <cstdint>
 #include <set>
 #include <string>
 
@@ -30,6 +31,13 @@ struct InboundEnvelope {
     double timestamp = 0.0;
     double ttl = 0.0;
     JsonObject body;
+    // Phase 4 source-IP plumbing: transport-layer source so handlers can
+    // unicast their reply (PROPOSE→REPORT especially needs this for >1 MTU
+    // payloads). Set to 0/0 by host tests; firmware passes the real values.
+    // Stored as uint32_t (host-order) + uint16_t to keep this header
+    // free of <Arduino.h>; the sketch converts to IPAddress when sending.
+    uint32_t source_ip = 0;
+    uint16_t source_port = 0;
 };
 
 enum class DispatchResult {
@@ -70,6 +78,13 @@ public:
 
     // Decode + verify + dispatch. Returns the disposition.
     DispatchResult deliver(const std::string& wire_bytes);
+
+    // Same, but stash the transport-layer source IP/port into the
+    // InboundEnvelope handed to the handler. Firmware uses this to unicast
+    // REPORT replies; host tests use the no-arg form.
+    DispatchResult deliver(const std::string& wire_bytes,
+                           uint32_t source_ip,
+                           uint16_t source_port);
 
 private:
     Handler _handler;
