@@ -103,11 +103,14 @@ class HFUploader:
             try:
                 changed = self._scan_changed_chunks(folder)
                 if changed:
-                    self.upload_root(
+                    ok = await asyncio.to_thread(
+                        self.upload_root,
                         folder,
                         delete_on_success=delete_on_success,
                         commit_message=f"chunks: {','.join(c.name for c in changed)}",
                     )
+                    if ok:
+                        self._commit_seen_mtime(changed)
                 if cap_local_episodes is not None:
                     self._enforce_cap(folder, cap_local_episodes)
                 await asyncio.sleep(poll_interval)
@@ -118,15 +121,28 @@ class HFUploader:
                 await asyncio.sleep(max(1.0, poll_interval))
 
     def _scan_changed_chunks(self, folder: Path) -> list[Path]:
+        """Return chunks whose mtime differs from last seen.
+
+        Caller is responsible for recording the new mtime via _commit_seen_mtime
+        after a successful upload, so failed uploads are retried on the next poll.
+        """
         out = []
         if not folder.exists():
             return out
         for chunk in folder.glob("data/chunk_*"):
             mt = chunk.stat().st_mtime
             if self._seen_mtime.get(chunk, 0) != mt:
-                self._seen_mtime[chunk] = mt
                 out.append(chunk)
         return out
+
+    def _commit_seen_mtime(self, chunks: list[Path]) -> None:
+        """Record current mtime so successful chunks aren't re-uploaded."""
+        for chunk in chunks:
+            try:
+                self._seen_mtime[chunk] = chunk.stat().st_mtime
+            except FileNotFoundError:
+                # Chunk deleted after upload (delete_on_success path)
+                self._seen_mtime[chunk] = 0
 
     def _enforce_cap(self, folder: Path, cap: int) -> None:
         eps = sorted((folder / "data").rglob("episode_*.parquet"))

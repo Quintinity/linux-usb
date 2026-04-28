@@ -85,8 +85,9 @@ class ManipulatorCitizen(Citizen):
                 constitution_hash=getattr(self, "constitution_hash", None),
             )
 
-        # HF uploader — enabled when dataset.hf_repo_id is set and
-        # dataset.upload_after_episode is True (both default to disabled/True).
+        # HF uploader — enabled when both Constitution Laws are favourable:
+        #   dataset.hf_repo_id     defaults to "" (empty disables uploads)
+        #   dataset.upload_after_episode defaults to True
         self._uploader = None
         self._uploader_task: asyncio.Task | None = None
 
@@ -108,8 +109,9 @@ class ManipulatorCitizen(Citizen):
                 cap = int(self._law("dataset.max_local_episodes", default=50))
                 retry_interval = float(self._law("dataset.retry_interval_s", default=300))
                 self._uploader = HFUploader(repo_id=repo_id)
-                dataset_root = self._recorder_v3.output_root
-                self._uploader_task = asyncio.get_event_loop().create_task(
+                repo_safe = self._recorder_v3.repo_id.replace("/", "__")
+                dataset_root = self._recorder_v3.output_root / repo_safe
+                self._uploader_task = asyncio.create_task(
                     self._uploader.watch(
                         dataset_root,
                         poll_interval=retry_interval,
