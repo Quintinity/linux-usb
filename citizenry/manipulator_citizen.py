@@ -1,9 +1,6 @@
-"""Raspberry Pi 5 — Follower Arm Manipulation Citizen.
+"""Follower-arm manipulation citizen.
 
-Receives teleop frames from the governor and writes positions to the
-follower arm servos. Validates constitution. Streams telemetry back.
-
-v2.0: Task bidding, skill-gated execution, XP tracking, warning generation.
+Hardware-agnostic — runs on any node with a Feetech servo bus attached. Today: Pi or Jetson.
 """
 
 import asyncio
@@ -27,7 +24,9 @@ MOTOR_NAMES = [
 
 
 class ManipulatorCitizen(Citizen):
-    """Manipulation citizen on the Raspberry Pi 5.
+    """Follower-arm manipulation citizen.
+
+    Hardware-agnostic — runs on any node with a Feetech servo bus attached.
 
     Responsibilities:
     - Drive the follower arm servos
@@ -159,12 +158,13 @@ class ManipulatorCitizen(Citizen):
                 governor_pubkey=getattr(self, "governor_pubkey", None),
                 constitution_hash=getattr(self, "constitution_hash", None),
             )
-        else:
+        elif fmt == "v1":
             # Law changed to v1-only; retire the v3 recorder (close any open episode first)
             if self._recorder_v3 is not None and self._recorder_v3._open_episode_id is not None:
                 self._recorder_v3.close_episode(success=False, notes="recorder retired by law change")
-            if fmt == "v1":
-                self._recorder_v3 = None
+            self._recorder_v3 = None
+        elif fmt not in ("v1", "v3", "both"):
+            self._log(f"unknown episode_recorder_format: {fmt!r} — keeping current recorder state")
 
         # Report back that we applied it
         if self._governor_key and self._governor_addr:
@@ -887,7 +887,7 @@ class ManipulatorCitizen(Citizen):
             )
             if self._recorder_v3 is not None:
                 fp_list = list(final_positions.values()) if isinstance(final_positions, dict) else (final_positions or [])
-                v3_frame_idx = len(self._recorder_v3._open_frames)
+                v3_frame_idx = self._recorder_v3.frame_count
                 v3_ts = (time.time() - t0)
                 self._recorder_v3.record_frame(
                     frame_index=v3_frame_idx,
@@ -1078,7 +1078,7 @@ class ManipulatorCitizen(Citizen):
                 if self._recorder_v3 is not None and self._recorder_v3._open_episode_id is not None:
                     actual_list = list(actual.values()) if isinstance(actual, dict) and actual else list(pose.values())
                     pose_list = list(pose.values())
-                    v3_idx = len(self._recorder_v3._open_frames)
+                    v3_idx = self._recorder_v3.frame_count
                     self._recorder_v3.record_frame(
                         frame_index=v3_idx,
                         timestamp=float(i) / steps * duration,

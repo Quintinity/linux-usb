@@ -18,7 +18,9 @@ from __future__ import annotations
 import json
 import time
 import os
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -403,9 +405,6 @@ def get_episode_summary(episode_id: int) -> str:
 
 # ── LeRobotDataset v3 writer ──────────────────────────────────────────────────
 
-import uuid
-from datetime import datetime, timezone
-
 
 class EpisodeRecorderV3:
     """Records episodes directly into a LeRobotDataset v3-style layout.
@@ -421,19 +420,19 @@ class EpisodeRecorderV3:
     (Task 6) detects new content via output_root mtime and uploads.
     """
 
-    MOTOR_NAMES = MOTOR_NAMES  # reuse module-level constant
-
     def __init__(
         self,
         output_root,           # Path | str
         repo_id: str = "local/citizenry-data",
         fps: int = 30,
         camera_names: tuple = ("base",),
+        episodes_per_chunk: int = 500,
     ):
         self.output_root = Path(output_root)
         self.repo_id = repo_id
         self.fps = int(fps)
         self.camera_names = tuple(camera_names)
+        self.episodes_per_chunk = int(episodes_per_chunk)
         self.output_root.mkdir(parents=True, exist_ok=True)
         self._open_episode_id: str | None = None
         self._open_frames: list = []
@@ -457,6 +456,11 @@ class EpisodeRecorderV3:
             "governor_pubkey": governor_pubkey,
             "constitution_hash": constitution_hash,
         }
+
+    @property
+    def frame_count(self) -> int:
+        """Number of frames recorded in the currently open episode."""
+        return len(self._open_frames)
 
     def begin_episode(self, task: str, params: dict) -> str:
         if self._open_episode_id is not None:
@@ -575,19 +579,25 @@ class EpisodeRecorderV3:
         table = pa.table(cols)
         repo_safe = self.repo_id.replace("/", "__")
         chunk_idx = self._next_chunk_index(repo_safe)
-        chunk_dir = self.output_root / repo_safe / "data" / f"chunk_{chunk_idx:03d}"
+        chunk_dir = self.output_root / repo_safe / "data" / f"chunk_{chunk_idx:04d}"
         chunk_dir.mkdir(parents=True, exist_ok=True)
         parquet_path = chunk_dir / f"episode_{eid}.parquet"
         pq.write_table(table, parquet_path)
         # MP4 per camera (only "base" camera is wired here; multi-camera
         # extension lands in Task 8 enhancement / PolicyCitizen integration)
-        video_root = self.output_root / repo_safe / "videos" / f"chunk_{chunk_idx:03d}"
+        video_root = self.output_root / repo_safe / "videos" / f"chunk_{chunk_idx:04d}"
         video_root.mkdir(parents=True, exist_ok=True)
         if frames:
-            self._write_mp4(
-                path=video_root / f"episode_{eid}_base.mp4",
-                images=[f["image"] for f in frames],
-            )
+            try:
+                self._write_mp4(
+                    path=video_root / f"episode_{eid}_base.mp4",
+                    images=[f["image"] for f in frames],
+                )
+            except Exception as e:
+                # Don't orphan the parquet — log and continue.
+                # The per-episode JSON below will reflect the frame count;
+                # consumers detect missing videos via os.path.exists.
+                print(f"[recorder-v3] WARN: MP4 write failed for {eid}: {e}")
         # Per-episode metadata (chunk-level, not dataset-level)
         meta_path = chunk_dir / f"episode_{eid}.json"
         meta_path.write_text(json.dumps({
@@ -607,8 +617,8 @@ class EpisodeRecorderV3:
         d = self.output_root / repo_safe / "data"
         if not d.exists():
             return 0
-        existing = sorted(d.glob("chunk_*"))
-        return len(existing)
+        total_episodes = sum(1 for _ in d.glob("chunk_*/episode_*.parquet"))
+        return total_episodes // self.episodes_per_chunk
 
     def _write_mp4(self, path, images) -> None:
         import cv2

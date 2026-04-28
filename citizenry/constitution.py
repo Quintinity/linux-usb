@@ -205,6 +205,16 @@ def default_constitution() -> Constitution:
             description="Which episode recorder version is active: v1, v3, or both (transition).",
             params={"value": "v3"},
         ),
+        Law(
+            id="dataset.hf_repo_id",
+            description="Hugging Face Hub repo for v3 dataset uploads (e.g. user/repo). Empty disables uploads.",
+            params={"value": ""},
+        ),
+        Law(
+            id="dataset.fps",
+            description="Frames per second for v3 dataset videos.",
+            params={"value": 30},
+        ),
     ]
 
     return Constitution(
