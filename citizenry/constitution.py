@@ -182,6 +182,15 @@ def default_constitution() -> Constitution:
             title="Collective Knowledge",
             text="Learned behaviors belong to the collective.",
         ),
+        Article(
+            number=6,
+            title="Policy Within Servo Limits",
+            text=(
+                "Policy citizens shall not emit action targets outside "
+                "ServoLimits. Defence in depth: ManipulatorCitizen also "
+                "clamps on ingress."
+            ),
+        ),
     ]
 
     laws = [
@@ -239,6 +248,11 @@ def default_constitution() -> Constitution:
             id="governor.recorder_enabled",
             description="Whether the GovernorNode is allowed to host an episode recorder. Always false — episodes record on the follower's node.",
             params={"value": False},
+        ),
+        Law(
+            id="policy_citizen.observation_cameras",
+            description="Two camera role names the policy uses for observation. Order matters: [primary, secondary].",
+            params={"value": ["wrist", "base"]},
         ),
     ]
 

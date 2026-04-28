@@ -161,6 +161,24 @@ def default_manipulator_skills() -> dict[str, SkillDef]:
     }
 
 
+def default_policy_skills() -> dict[str, SkillDef]:
+    """Default skill tree for policy citizens (e.g. SmolVLA)."""
+    return {
+        "imitation": SkillDef(
+            name="imitation",
+            description="Behaviour cloning / imitation learning policies",
+            prerequisites=[],
+            xp_required=0,
+        ),
+        "imitation:smolvla_base": SkillDef(
+            name="imitation:smolvla_base",
+            description="SmolVLA 450M pretrained on SO-100/101 community data",
+            prerequisites=["imitation"],
+            xp_required=0,
+        ),
+    }
+
+
 def default_camera_skills() -> dict[str, SkillDef]:
     """Default skill tree for camera citizens."""
     return {
