@@ -10,6 +10,7 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include "esp_camera.h"
+#include "esp_mac.h"        // esp_efuse_mac_get_default — reads MAC pre-WiFi
 #include "board_config.h"
 #include "camera_pins.h"
 #include "citizenry_camera.h"
@@ -31,10 +32,19 @@ extern void startCameraServer();
 static const char* WIFI_SSID = "Bradley-Starlink";
 static const char* WIFI_PSK  = "gjnl1105";
 
+// Read the device MAC directly from eFuse. WiFi.macAddress() returns zeros
+// until WiFi.begin() has actually progressed past association — calling it
+// pre-WiFi makes every device name itself "xiao-cam-0000", which we have
+// observed in the field. esp_efuse_mac_get_default() reads the burned MAC
+// directly and works at any point after boot.
+static void read_mac(uint8_t mac[6]) {
+    esp_efuse_mac_get_default(mac);
+}
+
 // Citizen name = "xiao-cam-" + last 4 hex of MAC (lowercase, no colons)
 static String make_citizen_name() {
     uint8_t mac[6];
-    WiFi.macAddress(mac);
+    read_mac(mac);
     char buf[32];
     snprintf(buf, sizeof(buf), "xiao-cam-%02x%02x", mac[4], mac[5]);
     for (char* p = buf; *p; p++) if (*p >= 'A' && *p <= 'Z') *p += 32;
@@ -46,7 +56,7 @@ static String make_citizen_name() {
 // port when binding to 0, so we choose explicitly and announce via mDNS TXT.
 static uint16_t make_unicast_port() {
     uint8_t mac[6];
-    WiFi.macAddress(mac);
+    read_mac(mac);
     uint16_t low = ((uint16_t)mac[4] << 8) | mac[5];
     return 50000u + (low % 15000u);
 }
