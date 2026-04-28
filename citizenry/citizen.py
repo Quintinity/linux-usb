@@ -65,6 +65,7 @@ class Neighbor:
     has_constitution: bool = False
     emotional_state: Any = None  # EmotionalState from heartbeat
     hardware: dict | None = None  # full dict from ADVERTISE, compact dict from HEARTBEAT
+    node_pubkey: str | None = None  # node-level identity (multiple citizens may share)
 
 
 @dataclass
@@ -485,6 +486,7 @@ class Citizen:
             state=body.get("state", "idle"),
             has_constitution=body.get("has_constitution", False),
             hardware=body.get("hw"),
+            node_pubkey=body.get("node_pubkey"),
         )
         is_new = sender not in self.neighbors
         self.neighbors[sender] = n
@@ -591,24 +593,35 @@ class Citizen:
                 self._log(f"skill tree processing failed: {e}")
 
     def _law(self, key: str, default=None):
-        """Read a Law from the ratified Constitution, with default fallback.
+        """Read a simple-value Law from the ratified Constitution, with default fallback.
 
-        Returns `default` when no Constitution has been ratified yet, or when
-        the key is absent. Always safe to call.
+        Simple-value laws store their scalar under params["value"] in the
+        governor's wire format (constitution.to_dict() → list of dicts), or as
+        the value itself in the president's simplified format ({"laws": {key: value}}).
 
-        Handles both wire format (laws as a list of dicts with 'id'/'params')
-        and simplified test format (laws as a plain dict keyed by law id).
+        Returns default when:
+          - no Constitution has been ratified
+          - the key is absent
+          - the law exists but has no params["value"] entry (wire format)
+
+        Structured laws with multi-key params (servo_limits, heartbeat_interval, etc.)
+        have dedicated helpers — do NOT use _law for those.
+
+        Always safe to call.
         """
         if not self.constitution:
             return default
-        laws = self.constitution.get("laws", {})
+        laws = self.constitution.get("laws")
         if isinstance(laws, dict):
-            # Simplified format: {"laws": {"law.id": value, ...}}
+            # Simplified / test / president format: laws is a plain dict
             return laws.get(key, default)
-        # Wire format: {"laws": [{"id": "...", "description": "...", "params": {...}}, ...]}
-        for law in laws:
-            if isinstance(law, dict) and law.get("id") == key:
-                return law.get("params", default)
+        if isinstance(laws, list):
+            # Wire format: list of {"id": ..., "params": {...}} dicts
+            for law in laws:
+                if law.get("id") == key:
+                    params = law.get("params") or {}
+                    return params.get("value", default)
+            return default
         return default
 
     def _on_neighbor_joined(self, neighbor: Neighbor):
@@ -845,6 +858,7 @@ class Citizen:
             saved_genome = load_genome(self.name)
             if saved_genome:
                 self.genome = saved_genome
+                self.genome.node_pubkey = self.node_pubkey  # always stamp with live node key
                 self.skill_tree.xp = dict(saved_genome.xp)
                 if saved_genome.immune_memory:
                     self.immune_memory.merge(
