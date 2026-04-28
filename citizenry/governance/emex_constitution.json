@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "governor_pubkey": "",
+  "deployment": "emex-2026",
+  "deployment_notes": "Auckland Showgrounds, 26-28 May 2026. Visitor-facing SO-101 cell 2 (kit-component sort). Hard caps below are non-negotiable; the only Governor handle for the demo is governor_torque_relax (75% under signed amendment).",
+  "articles": [
+    {
+      "number": 1,
+      "title": "Do No Harm to Visitors",
+      "text": "No command may cause physical harm to humans. The arm operates within reach of unattended visitors; any motion that intersects the visitor envelope (outside the tray + bin region) MUST be rejected, regardless of operator authority."
+    },
+    {
+      "number": 2,
+      "title": "Stay Inside the Demo Envelope",
+      "text": "The follower arm MUST remain inside the position envelope defined in servo_limits.position_envelope. Any commanded position outside that envelope is rejected, the motion is halted, and the citizen reports a Constitution violation."
+    },
+    {
+      "number": 3,
+      "title": "Halt on Overvoltage",
+      "text": "If the bus voltage exceeds servo_limits.max_voltage (7.4V), the citizen MUST halt all torque output, log the event, and refuse new motion commands until a Governor reset arrives via signed GOVERN message."
+    },
+    {
+      "number": 4,
+      "title": "Visitor-Safe Torque",
+      "text": "Servo torque is capped at servo_limits.max_torque_pct (60% of rated) by default. Only a Governor-signed amendment carrying the governor_torque_relax law may temporarily raise the cap to 75% for a demonstration; the cap returns to 60% on the next Constitution broadcast."
+    },
+    {
+      "number": 5,
+      "title": "Governor Authority",
+      "text": "The Governor CLI can always halt, override, or recall the citizen via signed GOVERN messages. No other principal may relax safety caps."
+    },
+    {
+      "number": 6,
+      "title": "Truthful Reporting",
+      "text": "The citizen MUST truthfully report its state, including any Constitution-violation rejections, to the mesh REPORT channel. No spoofing of compliance."
+    }
+  ],
+  "laws": [
+    {
+      "id": "idle_timeout",
+      "description": "Arms return to home position after idle period (visitor walked away).",
+      "params": {"seconds": 90}
+    },
+    {
+      "id": "teleop_max_fps",
+      "description": "Maximum teleop frame rate from leader to follower.",
+      "params": {"fps": 60}
+    },
+    {
+      "id": "heartbeat_interval",
+      "description": "Seconds between heartbeat pings on the mesh.",
+      "params": {"seconds": 2.0}
+    },
+    {
+      "id": "governor_torque_relax",
+      "description": "Permits the Governor CLI to temporarily relax the torque cap to 75% (from the 60% default) via a signed amendment. This is the EMEX demo handle: visitor edits the Constitution on the side tablet, the citizen enforces the new cap instantly. Never above 75%.",
+      "params": {
+        "max_torque_pct_when_relaxed": 75,
+        "requires_signed_amendment": true,
+        "auto_revert_seconds": 300
+      }
+    },
+    {
+      "id": "violation_response",
+      "description": "What the citizen does on any Constitution-violation rejection.",
+      "params": {
+        "halt_motion": true,
+        "report_to_mesh": true,
+        "require_governor_reset": false
+      }
+    }
+  ],
+  "servo_limits": {
+    "max_torque": 600,
+    "protection_current": 250,
+    "max_temperature": 60,
+    "overload_torque": 80,
+    "protective_torque": 50,
+    "min_voltage": 6.0,
+    "max_torque_pct": 60,
+    "max_voltage": 7.4,
+    "position_envelope": {
+      "shoulder_pan": {"min_deg": -45.0, "max_deg": 45.0},
+      "shoulder_lift": {"min_deg": -90.0, "max_deg": 0.0},
+      "elbow_flex": {"min_deg": -120.0, "max_deg": -10.0},
+      "wrist_flex": {"min_deg": -90.0, "max_deg": 30.0},
+      "wrist_roll": {"min_deg": -90.0, "max_deg": 90.0},
+      "gripper": {"min_deg": 0.0, "max_deg": 60.0}
+    }
+  },
+  "signature": ""
+}
