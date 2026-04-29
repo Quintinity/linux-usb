@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Quintinity ShopOS — approval gate</title>
+<style>
+  :root {
+    --bg: #0c1220;
+    --panel: #14213b;
+    --panel-2: #1b2a4d;
+    --ink: #f4f6fb;
+    --ink-dim: #9eb0d3;
+    --ink-mute: #6f82a8;
+    --accent: #56d6ff;
+    --good: #2ecc71;
+    --good-deep: #1e8a4d;
+    --warn: #f1c40f;
+    --danger: #ff4757;
+    --reject: #6b7280;
+    --reject-deep: #4b5563;
+    --tile: #0f1830;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+    height: 100vh;
+    overflow: hidden;
+  }
+  body {
+    display: flex; flex-direction: column;
+    padding: 18px 24px 24px;
+    gap: 14px;
+  }
+
+  /* ----- header (15%) ----- */
+  header {
+    flex: 0 0 auto;
+    display: flex; justify-content: space-between; align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+  }
+  header .title {
+    font-size: 22px; font-weight: 700; letter-spacing: 0.4px;
+  }
+  header .title .small {
+    color: var(--ink-dim); font-weight: 400; font-size: 14px; margin-left: 6px;
+  }
+  header .meta {
+    display: flex; align-items: center; gap: 18px;
+    font-size: 14px; color: var(--ink-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .conn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(46, 204, 113, 0.12);
+    border: 1px solid rgba(46, 204, 113, 0.5);
+    color: var(--good);
+    font-size: 13px;
+  }
+  .conn .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--good);
+    box-shadow: 0 0 6px var(--good);
+  }
+  .conn.degraded { background: rgba(241, 196, 15, 0.12); border-color: rgba(241, 196, 15, 0.5); color: var(--warn); }
+  .conn.degraded .dot { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+  .conn.down { background: rgba(255, 71, 87, 0.12); border-color: rgba(255, 71, 87, 0.5); color: var(--danger); }
+  .conn.down .dot { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+
+  /* ----- proposed action zone (50%) ----- */
+  .hero {
+    flex: 1 1 auto;
+    background: var(--panel);
+    border-radius: 16px;
+    padding: 22px 26px;
+    display: flex; flex-direction: column;
+    overflow: auto;
+    transition: opacity 0.35s ease;
+  }
+  .hero.dim { opacity: 0.25; }
+
+  .verb-line {
+    font-size: 30px;
+    font-weight: 600;
+    line-height: 1.25;
+    margin-bottom: 6px;
+    letter-spacing: 0.2px;
+  }
+  .verb-line .noun {
+    color: var(--accent);
+    font-weight: 800;
+  }
+  .source-row {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--ink-dim); font-size: 14px;
+    margin-bottom: 16px;
+  }
+  .chip {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: rgba(86, 214, 255, 0.13);
+    color: var(--accent);
+    border: 1px solid rgba(86, 214, 255, 0.4);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.3px;
+  }
+
+  .impact {
+    background: var(--panel-2);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 10px 10px 0;
+    padding: 12px 16px;
+    color: var(--ink);
+    font-size: 16px;
+    line-height: 1.45;
+    margin-bottom: 18px;
+  }
+
+  .evidence-title {
+    font-size: 12px;
+    color: var(--ink-mute);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    margin-bottom: 8px;
+  }
+  .timeline {
+    display: flex; flex-direction: column;
+    gap: 10px;
+    border-left: 2px solid rgba(255,255,255,0.1);
+    padding-left: 16px;
+    margin-left: 6px;
+  }
+  .timeline .step {
+    position: relative;
+    background: var(--tile);
+    border-radius: 10px;
+    padding: 10px 14px;
+  }
+  .timeline .step::before {
+    content: "";
+    position: absolute;
+    left: -23px; top: 14px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--bg);
+  }
+  .step .head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 2px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  .step .kind {
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 12px;
+  }
+  .step .hash {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--ink-mute);
+    font-size: 12px;
+  }
+  .step .summary {
+    font-size: 14px;
+    color: var(--ink);
+    line-height: 1.4;
+  }
+
+  .empty-state {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    color: var(--ink-dim);
+  }
+  .empty-state .big { font-size: 28px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
+  .empty-state .sub { font-size: 14px; }
+
+  /* ----- action buttons (35%) ----- */
+  .actions {
+    flex: 0 0 auto;
+    display: flex; flex-direction: column;
+    gap: 14px;
+  }
+  .btn-approve {
+    width: 100%;
+    min-height: 130px;
+    border: none;
+    border-radius: 16px;
+    background: linear-gradient(180deg, #2ecc71, #1e8a4d);
+    color: white;
+    font-size: 36px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(46, 204, 113, 0.35);
+    transition: transform 0.06s ease, opacity 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-approve:active { transform: scale(0.985); }
+  .btn-approve[disabled] { opacity: 0.4; cursor: default; }
+
+  .reject-row {
+    display: flex; justify-content: flex-end;
+  }
+  .btn-reject {
+    min-height: 56px;
+    min-width: 140px;
+    padding: 0 22px;
+    border: none;
+    border-radius: 12px;
+    background: var(--reject);
+    color: white;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    cursor: pointer;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.35);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-reject:active { background: var(--reject-deep); }
+  .btn-reject[disabled] { opacity: 0.4; cursor: default; }
+
+  /* ----- toast ----- */
+  .toast {
+    position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%);
+    background: rgba(20, 33, 59, 0.97);
+    color: var(--ink);
+    padding: 14px 22px;
+    border-radius: 10px;
+    border: 1px solid rgba(86, 214, 255, 0.4);
+    font-size: 16px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    max-width: 90vw;
+    z-index: 30;
+  }
+  .toast.show { opacity: 1; }
+  .toast.good { border-color: rgba(46, 204, 113, 0.55); }
+  .toast.bad { border-color: rgba(255, 71, 87, 0.55); }
+
+  /* ----- reject reason modal ----- */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(6, 10, 22, 0.78);
+    display: none;
+    align-items: center; justify-content: center;
+    padding: 24px;
+    z-index: 40;
+  }
+  .modal-backdrop.show { display: flex; }
+  .modal {
+    background: var(--panel);
+    border-radius: 14px;
+    padding: 24px;
+    width: min(560px, 100%);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+  }
+  .modal h3 { margin: 0 0 12px 0; font-size: 22px; }
+  .modal p  { margin: 0 0 14px 0; color: var(--ink-dim); font-size: 14px; line-height: 1.4; }
+  .modal input {
+    width: 100%;
+    background: var(--tile);
+    color: var(--ink);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-size: 16px;
+    margin-bottom: 16px;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  .modal input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .modal .row { display: flex; gap: 12px; justify-content: flex-end; }
+  .modal button {
+    min-height: 56px; min-width: 140px;
+    padding: 0 22px;
+    border: none; border-radius: 10px;
+    font-size: 16px; font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .modal .cancel { background: var(--reject); color: white; }
+  .modal .confirm { background: linear-gradient(180deg, #ff4757, #b3252f); color: white; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="title">
+      Quintinity ShopOS<span class="small">— approval gate</span>
+    </div>
+    <div class="meta">
+      <span id="clock">--:--:--</span>
+      <span class="conn" id="conn"><span class="dot"></span><span id="conn-label">connected</span></span>
+    </div>
+  </header>
+
+  <section class="hero" id="hero">
+    <div id="proposal">
+      <div class="verb-line" id="verb-line">Loading proposed action…</div>
+      <div class="source-row">
+        <span id="source">—</span>
+        <span class="chip" id="confidence" style="display:none">confidence —</span>
+      </div>
+      <div class="impact" id="impact">—</div>
+      <div class="evidence-title">Evidence chain</div>
+      <div class="timeline" id="timeline"></div>
+    </div>
+    <div class="empty-state" id="empty" style="display:none">
+      <div class="big">No more proposals</div>
+      <div class="sub">The orchestrator is idle — the next proposal will appear here automatically.</div>
+    </div>
+  </section>
+
+  <div class="actions">
+    <button class="btn-approve" id="btn-approve">APPROVE</button>
+    <div class="reject-row">
+      <button class="btn-reject" id="btn-reject">Reject</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <div class="modal-backdrop" id="reject-modal">
+    <div class="modal">
+      <h3>Reject this proposal?</h3>
+      <p>Briefly note why so the chain captures it. Operators can review later via the action ledger.</p>
+      <input type="text" id="reject-reason" placeholder="e.g. coolant pump at 40 PSI, defer until shift change" maxlength="160" autocomplete="off" />
+      <div class="row">
+        <button class="cancel" id="reject-cancel">Cancel</button>
+        <button class="confirm" id="reject-confirm">Confirm reject</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+const POLL_MS = 2000;
+let currentProposalId = null;
+let inflight = false;
+
+function fmtClock() {
+  const d = new Date();
+  $("clock").textContent = d.toTimeString().slice(0, 8);
+}
+
+function setConn(status) {
+  const el = $("conn");
+  el.classList.remove("degraded", "down");
+  if (status === "degraded") { el.classList.add("degraded"); $("conn-label").textContent = "degraded"; }
+  else if (status === "down") { el.classList.add("down"); $("conn-label").textContent = "disconnected"; }
+  else { $("conn-label").textContent = "connected"; }
+}
+
+function showToast(msg, kind) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.remove("good", "bad");
+  if (kind) t.classList.add(kind);
+  t.classList.add("show");
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => t.classList.remove("show"), 2000);
+}
+
+function renderProposal(p) {
+  if (!p) {
+    $("proposal").style.display = "none";
+    $("empty").style.display = "flex";
+    $("btn-approve").disabled = true;
+    $("btn-reject").disabled = true;
+    currentProposalId = null;
+    return;
+  }
+  $("proposal").style.display = "block";
+  $("empty").style.display = "none";
+  $("btn-approve").disabled = false;
+  $("btn-reject").disabled = false;
+  currentProposalId = p.id;
+
+  const verbHtml = `${escapeHtml(p.action_verb)}: ` +
+    p.nouns.map(n => `<span class="noun">${escapeHtml(n)}</span>`).join(" &rarr; ");
+  $("verb-line").innerHTML = verbHtml;
+
+  $("source").textContent = "Proposed by: " + (p.proposed_by || "?");
+  if (typeof p.confidence === "number") {
+    const c = $("confidence");
+    c.style.display = "inline-block";
+    c.textContent = "confidence " + p.confidence.toFixed(2);
+  } else {
+    $("confidence").style.display = "none";
+  }
+
+  $("impact").textContent = p.impact_statement || "";
+
+  const tl = $("timeline");
+  tl.innerHTML = "";
+  for (const step of (p.evidence_chain || [])) {
+    const div = document.createElement("div");
+    div.className = "step";
+    div.innerHTML = `
+      <div class="head">
+        <span class="kind">${escapeHtml(step.kind || "?")}</span>
+        <span class="hash">${escapeHtml(step.short_hash || "")}</span>
+      </div>
+      <div class="summary">${escapeHtml(step.summary || "")}</div>
+    `;
+    tl.appendChild(div);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[c]);
+}
+
+async function fetchPending() {
+  if (inflight) return;
+  try {
+    const r = await fetch("/pending", { cache: "no-store" });
+    if (!r.ok) { setConn("degraded"); return; }
+    const j = await r.json();
+    setConn("up");
+    if (j.proposal && j.proposal.id === currentProposalId) return;
+    renderProposal(j.proposal || null);
+  } catch (e) {
+    setConn("down");
+  }
+}
+
+async function postDecision(path, body) {
+  if (inflight) return;
+  inflight = true;
+  $("btn-approve").disabled = true;
+  $("btn-reject").disabled = true;
+  $("hero").classList.add("dim");
+  try {
+    const t0 = performance.now();
+    const r = await fetch(path, {
+      method: "POST",
+      headers: {"content-type": "application/json"},
+      body: JSON.stringify(body || {}),
+    });
+    const dt = (performance.now() - t0).toFixed(0);
+    if (!r.ok) {
+      const txt = await r.text().catch(() => "");
+      showToast(`HTTP ${r.status} after ${dt}ms: ${txt.slice(0,80)}`, "bad");
+      return false;
+    }
+    const j = await r.json();
+    const verb = path.endsWith("/approve") ? "Approved" : "Rejected";
+    const ts = new Date().toTimeString().slice(0, 8);
+    const sig = (j.ledger_hash || "").slice(0, 8);
+    showToast(`${verb} at ${ts} — chain extended to hash ${sig} (${dt}ms)`, "good");
+    if (j.next_proposal !== undefined) {
+      setTimeout(() => renderProposal(j.next_proposal), 500);
+    }
+    return true;
+  } catch (e) {
+    showToast("network error: " + e.message, "bad");
+    return false;
+  } finally {
+    setTimeout(() => { $("hero").classList.remove("dim"); }, 500);
+    setTimeout(() => {
+      inflight = false;
+      $("btn-approve").disabled = currentProposalId == null;
+      $("btn-reject").disabled = currentProposalId == null;
+    }, 600);
+  }
+}
+
+$("btn-approve").addEventListener("click", () => {
+  if (!currentProposalId) return;
+  postDecision("/approve", { id: currentProposalId });
+});
+
+$("btn-reject").addEventListener("click", () => {
+  if (!currentProposalId) return;
+  $("reject-reason").value = "";
+  $("reject-modal").classList.add("show");
+  setTimeout(() => $("reject-reason").focus(), 50);
+});
+
+$("reject-cancel").addEventListener("click", () => {
+  $("reject-modal").classList.remove("show");
+});
+
+$("reject-confirm").addEventListener("click", async () => {
+  const reason = $("reject-reason").value.trim();
+  if (!reason) {
+    showToast("Reason required to reject.", "bad");
+    return;
+  }
+  $("reject-modal").classList.remove("show");
+  await postDecision("/reject", { id: currentProposalId, reason });
+});
+
+setInterval(fmtClock, 1000); fmtClock();
+fetchPending();
+setInterval(fetchPending, POLL_MS);
+</script>
+</body>
+</html>
