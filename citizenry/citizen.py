@@ -682,8 +682,18 @@ class Citizen:
         if isinstance(jp, list) and jp:
             state_arr = jp
         elif isinstance(jp, dict) and jp:
-            # Preserve a stable order if MOTOR_NAMES are keys; else dict order.
-            state_arr = list(jp.values())
+            # Reorder by MOTOR_NAMES so the cached state vector is canonical
+            # regardless of how the sender constructed the dict. ManipulatorCitizen
+            # builds it in MOTOR_NAMES order today (see _read_all_positions), but
+            # other sources (PainEvent.joint_positions, future state_share
+            # REPORTs) carry no such ordering guarantee. Lazy import avoids a
+            # circular dependency: policy_citizen imports from citizen.
+            from .policy_citizen import MOTOR_NAMES
+            state_arr = [jp[k] for k in MOTOR_NAMES if k in jp]
+            if not state_arr:
+                # Dict carried no recognized motor keys — fall back to whatever
+                # values are present, preserving insertion order.
+                state_arr = list(jp.values())
         elif body.get("type") == "telemetry":
             motors = body.get("motors")
             if isinstance(motors, dict) and motors:

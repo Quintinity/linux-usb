@@ -113,7 +113,7 @@ def test_sniff_extracts_joint_positions_list_from_report():
 
 def test_sniff_extracts_joint_positions_dict_from_report():
     """A REPORT body with joint_positions as a dict (pain-event shape) is also
-    accepted — values become the state vector."""
+    accepted — values become the state vector in canonical MOTOR_NAMES order."""
     from citizenry.citizen import Citizen
     c = Citizen.__new__(Citizen)
     c.observations = ObservationCache()
@@ -129,7 +129,40 @@ def test_sniff_extracts_joint_positions_dict_from_report():
     Citizen._sniff_observation_body(c, env, body)
     out = c.observations.latest_state("follower_pk_x", max_age_s=5.0, now=51.0)
     assert out is not None
-    assert sorted(list(out)) == [100, 200, 300, 400, 500, 600]
+    # Order must match MOTOR_NAMES — not sorted, not insertion order.
+    assert list(out) == [100, 200, 300, 400, 500, 600]
+
+
+def test_sniff_reorders_joint_positions_dict_to_motor_names_order():
+    """Even when the dict is constructed in reverse insertion order, the state
+    vector must come back in canonical MOTOR_NAMES order. This is the
+    defensive-ordering contract that protects against senders that don't build
+    dicts in MOTOR_NAMES order (e.g. PainEvent dicts, future state_share
+    REPORTs)."""
+    from citizenry.citizen import Citizen
+    c = Citizen.__new__(Citizen)
+    c.observations = ObservationCache()
+    c.neighbors = {}
+
+    env = _make_report_envelope("follower_pk_rev", {})
+    # Reverse insertion order — gripper first, shoulder_pan last.
+    body = {
+        "type": "pain_event",
+        "joint_positions": {
+            "gripper":       600,
+            "wrist_roll":    500,
+            "wrist_flex":    400,
+            "elbow_flex":    300,
+            "shoulder_lift": 200,
+            "shoulder_pan":  100,
+        },
+        "timestamp": 50.0,
+    }
+    Citizen._sniff_observation_body(c, env, body)
+    out = c.observations.latest_state("follower_pk_rev", max_age_s=5.0, now=51.0)
+    assert out is not None
+    # Even with reversed dict, output is MOTOR_NAMES order.
+    assert list(out) == [100, 200, 300, 400, 500, 600]
 
 
 def test_sniff_extracts_position_from_telemetry_motors():

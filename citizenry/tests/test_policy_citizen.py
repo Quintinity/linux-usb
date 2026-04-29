@@ -103,11 +103,13 @@ async def test_execute_task_emits_teleop_when_neighbor_resolves(tmp_path, monkey
     )
     # Seed the observation cache so _assemble_observation produces a real
     # observation (otherwise the loop would sleep waiting for camera frames).
-    import time as _time
-    now = _time.time()
-    p.observations.update_frame("wrist", np.zeros((96, 128, 3), dtype=np.uint8), timestamp=now)
-    p.observations.update_frame("base",  np.zeros((96, 128, 3), dtype=np.uint8), timestamp=now)
-    p.observations.update_state("follower_pk", [0, 0, 0, 0, 0, 0], timestamp=now)
+    # Use a far-future timestamp so _assemble_observation's 0.5s max_age window
+    # cannot expire even under heavy CI load — the alternative (time.time() +
+    # short sleeps) is race-prone.
+    future_ts = 1e12
+    p.observations.update_frame("wrist", np.zeros((96, 128, 3), dtype=np.uint8), timestamp=future_ts)
+    p.observations.update_frame("base",  np.zeros((96, 128, 3), dtype=np.uint8), timestamp=future_ts)
+    p.observations.update_state("follower_pk", [0, 0, 0, 0, 0, 0], timestamp=future_ts)
     # Stub send_teleop so we can count calls without networking
     sent = []
     def fake_send_teleop(recipient, positions, addr):
