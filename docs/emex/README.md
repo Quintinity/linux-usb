@@ -21,6 +21,15 @@ Voice rules: NZ English; plain language; no hype; reference customer is anonymis
 | T45 | [`T45-press-pitch.md`](T45-press-pitch.md) | Press recipient list + email template + follow-up rule | NZ trade and business press |
 | T50 | [`T50-post-show-auto-respond.md`](T50-post-show-auto-respond.md) | Tally-fired auto-respond email (plain-text + minimal HTML) | Anyone who submits the stand iPad form during the show window |
 
+## Operations
+
+| Task | File | Purpose | Audience |
+|---|---|---|---|
+| T34 | [`T34-stand-video-script.md`](T34-stand-video-script.md) | 60-second loop video shooting script — shot-by-shot, mute-friendly | Videographer + Bradley |
+| T39 | [`T39-stand-setup-checklist.md`](T39-stand-setup-checklist.md) | AV/power/network setup checklist — pre-flight, day-before, show-morning, end-of-day, pack-down | Bradley + Philippe on stand |
+| T40 | [`T40-spare-hardware-checklist.md`](T40-spare-hardware-checklist.md) | Spare hardware/cables/peripherals packing list with hot-swap targets | Bradley packing the kit |
+| T48 | [`T48-packout-and-transport.md`](T48-packout-and-transport.md) | Pack-out, loading order, transport, insurance, return-trip plan | Bradley + driver |
+
 ## Companion specs
 
 - Strategy: `~/linux-usb/docs/superpowers/specs/2026-04-27-quintinity-strategy-design.md`
