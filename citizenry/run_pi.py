@@ -17,22 +17,27 @@ import argparse
 import asyncio
 import signal
 
-from .pi_citizen import PiCitizen
+from .manipulator_citizen import ManipulatorCitizen
+from .leader_citizen import LeaderCitizen
 from .camera_citizen import CameraCitizen
 from .citizen import Citizen
 from .survey import HardwareMap, project_capabilities, survey_hardware
+
+# Legacy alias kept for isinstance checks during transition
+PiCitizen = ManipulatorCitizen
 
 
 async def main(args):
     if args.port and not args.auto_detect:
         await _run_single(args.port)
         return
-    await _run_auto_detect()
+    leader_port = getattr(args, "leader_port", None)
+    await _run_auto_detect(leader_port=leader_port)
 
 
 async def _run_single(port: str):
     """Legacy: run a single follower citizen."""
-    citizen = PiCitizen(follower_port=port)
+    citizen = ManipulatorCitizen(follower_port=port)
     loop = asyncio.get_event_loop()
     stop_event = asyncio.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -59,12 +64,22 @@ def _brain_name(hw: HardwareMap) -> str:
 async def _spawn_servo_citizen(citizens: dict, bus, hw: HardwareMap, name: str):
     print(f"[hardware] Servo controller: {bus.port} → {name}")
     try:
-        citizen = PiCitizen(follower_port=bus.port, hardware=hw)
+        citizen = ManipulatorCitizen(follower_port=bus.port, hardware=hw)
         citizen.name = name
         await citizen.start()
         citizens[bus.port] = citizen
     except Exception as e:
         print(f"[hardware] Failed on {bus.port}: {e}")
+
+
+async def _spawn_leader_citizen(citizens: dict, port: str):
+    print(f"[hardware] Leader bus: {port}")
+    try:
+        citizen = LeaderCitizen(leader_port=port)
+        await citizen.start()
+        citizens[f"leader:{port}"] = citizen
+    except Exception as e:
+        print(f"[hardware] Failed leader on {port}: {e}")
 
 
 async def _spawn_camera_citizen(citizens: dict, cam, name: str):
@@ -88,7 +103,7 @@ async def _stop_citizen(citizens: dict, key: str, label: str):
         del citizens[key]
 
 
-async def _run_auto_detect():
+async def _run_auto_detect(leader_port: str | None = None):
     """Survey hardware, always spawn brain + per-device citizens, then hotplug-watch."""
     print("[auto-detect] Scanning for hardware...")
 
@@ -122,6 +137,10 @@ async def _run_auto_detect():
     for i, cam in enumerate(usb_cams):
         name = f"pi-camera-{i}" if len(usb_cams) > 1 else "pi-camera"
         await _spawn_camera_citizen(citizens, cam, name)
+
+    # Optional leader arm (e.g. Pi acting as both leader and follower node)
+    if leader_port:
+        await _spawn_leader_citizen(citizens, leader_port)
 
     print(f"[auto-detect] {len(citizens)} citizens started. Monitoring for hotplug...")
 
@@ -188,6 +207,8 @@ def cli():
     parser = argparse.ArgumentParser(description="Pi 5 — Auto-Detecting Citizen Launcher")
     parser.add_argument("--port", default=None, help="Specific servo port (disables auto-detect)")
     parser.add_argument("--follower-port", default=None, dest="port", help="Alias for --port")
+    parser.add_argument("--leader-port", default=None, dest="leader_port",
+                        help="Leader arm serial port (spawns LeaderCitizen on this node)")
     parser.add_argument("--auto-detect", action="store_true", default=True)
     parser.add_argument("--no-auto-detect", action="store_false", dest="auto_detect")
     args = parser.parse_args()

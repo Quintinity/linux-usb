@@ -2,14 +2,17 @@
 """Run the Surface Pro 7 governor citizen.
 
 Usage:
-    python -m citizenry surface [--leader-port /dev/ttyACM1] [--fps 60] [--dashboard]
+    python -m citizenry surface [--dashboard]
+
+The governor hosts no arms. Leader and follower arms now run as
+LeaderCitizen / ManipulatorCitizen on whichever node has the hardware.
 """
 
 import argparse
 import asyncio
 import signal
 
-from .surface_citizen import SurfaceCitizen
+from .governor_citizen import GovernorCitizen
 from .survey import survey_hardware
 
 
@@ -17,11 +20,8 @@ async def main(args):
     hw = await survey_hardware()
     print(f"[survey] cameras={len(hw.cameras)} accelerators={len(hw.accelerators)} "
           f"servo_buses={len(hw.servo_buses)} cpu={hw.compute.cpu_model}")
-    citizen = SurfaceCitizen(
-        leader_port=args.leader_port,
-        teleop_fps=args.fps,
-        hardware=hw,
-    )
+    citizen = GovernorCitizen(hardware=hw)
+    print("[surface] governor only — no arms, no recorder")
 
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -51,8 +51,6 @@ async def shutdown(citizen):
 
 def cli():
     parser = argparse.ArgumentParser(description="Surface Pro 7 — Governor Citizen")
-    parser.add_argument("--leader-port", default="/dev/ttyACM1", help="Leader arm serial port")
-    parser.add_argument("--fps", type=float, default=60.0, help="Teleop frame rate")
     parser.add_argument("--dashboard", action="store_true", help="Show live TUI dashboard")
     args = parser.parse_args()
     asyncio.run(main(args))

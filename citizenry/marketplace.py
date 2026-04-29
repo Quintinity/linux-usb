@@ -81,6 +81,9 @@ class Bid:
     health: float = 1.0
     estimated_duration: float = 0.0
     timestamp: float = field(default_factory=time.time)
+    # Co-location and follower-targeting metadata
+    node_pubkey: str = ""
+    target_follower_pubkey: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -96,6 +99,8 @@ class Bid:
             current_load=bid_data.get("load", 0.0),
             health=bid_data.get("health", 1.0),
             estimated_duration=bid_data.get("estimated_duration", 0.0),
+            node_pubkey=bid_data.get("node_pubkey", ""),
+            target_follower_pubkey=bid_data.get("target_follower_pubkey", ""),
         )
 
 
@@ -113,15 +118,21 @@ def compute_bid_score(
     health: float,
     fatigue: float = 0.0,
     weights: dict[str, float] | None = None,
+    co_location_bonus: float = 0.0,
 ) -> float:
     """Compute composite bid score with fatigue modifier.
 
     score = (capability_weight * (skill_level / 10)
            + availability_weight * (1 - load)
            + health_weight * health) * (1.0 - 0.3 * fatigue)
+           + co_location_bonus
 
     All components normalized to [0, 1]. Skill level capped at 10.
     Fatigue reduces the score by up to 30% (FR-4.3).
+
+    co_location_bonus: extra absolute score awarded to bidders co-located
+    with the targeted follower (same node_pubkey). Default 0.0; spec
+    recommends 0.15.
     """
     w = {**DEFAULT_WEIGHTS, **(weights or {})}
     skill_norm = min(skill_level, 10) / 10.0
@@ -129,7 +140,7 @@ def compute_bid_score(
     h = max(0.0, min(1.0, health))
     base = w["capability"] * skill_norm + w["availability"] * avail + w["health"] * h
     fatigue_modifier = 1.0 - 0.3 * max(0.0, min(1.0, fatigue))
-    return base * fatigue_modifier
+    return base * fatigue_modifier + co_location_bonus
 
 
 def select_winner(bids: list[Bid]) -> Bid | None:
@@ -240,8 +251,18 @@ class TaskMarketplace:
         citizen_skills: list[str],
         citizen_load: float,
         citizen_health: float,
+        *,
+        target_follower_pubkey: str = "",
     ) -> tuple[bool, str]:
         """Check if a citizen is eligible to bid on a task."""
+        # Follower-targeting filter (spec §4.4):
+        # When the task pins itself to a specific follower via params.follower_pubkey,
+        # only bidders that declare they're driving THAT follower may pass.
+        # An empty target_follower_pubkey is a non-declaration and fails this gate
+        # (defensive — explicit declarations only).
+        requested = task.params.get("follower_pubkey")
+        if requested and target_follower_pubkey != requested:
+            return False, f"follower mismatch: bid targets {target_follower_pubkey[:8]!r}, task wants {requested[:8]!r}"
         # Check capabilities
         for cap in task.required_capabilities:
             if cap not in citizen_capabilities:

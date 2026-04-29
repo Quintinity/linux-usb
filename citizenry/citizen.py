@@ -65,6 +65,7 @@ class Neighbor:
     has_constitution: bool = False
     emotional_state: Any = None  # EmotionalState from heartbeat
     hardware: dict | None = None  # full dict from ADVERTISE, compact dict from HEARTBEAT
+    node_pubkey: str | None = None  # node-level identity (multiple citizens may share)
 
 
 @dataclass
@@ -85,6 +86,7 @@ class Citizen:
         citizen_type: str,
         capabilities: list[str],
         heartbeat_interval: float = 2.0,
+        node_pubkey: str | None = None,
     ):
         self.name = name
         self.citizen_type = citizen_type
@@ -95,6 +97,12 @@ class Citizen:
         self._signing_key = load_or_create_identity(name)
         self.pubkey = pubkey_hex(self._signing_key)
         self.short_id = short_id(self.pubkey)
+
+        # Node identity — shared across all citizens on this machine
+        if node_pubkey is None:
+            from .node_identity import get_node_pubkey
+            node_pubkey = get_node_pubkey()
+        self.node_pubkey = node_pubkey
 
         # Neighbor table
         self.neighbors: dict[str, Neighbor] = {}
@@ -133,6 +141,7 @@ class Citizen:
         self.genome = CitizenGenome(
             citizen_name=name,
             citizen_type=citizen_type,
+            node_pubkey=self.node_pubkey,
         )
         self.emotional_state = EmotionalState()
         self._tasks_completed_count = 0
@@ -245,6 +254,7 @@ class Citizen:
             "state": self.state,
             "unicast_port": self._unicast.bound_port,
             "has_constitution": self.constitution_received,
+            "node_pubkey": self.node_pubkey,
         }
         if self.hardware is not None:
             body["hw"] = self.hardware.to_full_dict()
@@ -476,6 +486,7 @@ class Citizen:
             state=body.get("state", "idle"),
             has_constitution=body.get("has_constitution", False),
             hardware=body.get("hw"),
+            node_pubkey=body.get("node_pubkey"),
         )
         is_new = sender not in self.neighbors
         self.neighbors[sender] = n
@@ -580,6 +591,38 @@ class Citizen:
                 self._add_log("GOVERN", short_id(env.sender), f"skills: {len(skill_defs)} defs")
             except Exception as e:
                 self._log(f"skill tree processing failed: {e}")
+
+    def _law(self, key: str, default=None):
+        """Read a simple-value Law from the ratified Constitution, with default fallback.
+
+        Simple-value laws store their scalar under params["value"] in the
+        governor's wire format (constitution.to_dict() → list of dicts), or as
+        the value itself in the president's simplified format ({"laws": {key: value}}).
+
+        Returns default when:
+          - no Constitution has been ratified
+          - the key is absent
+          - the law exists but has no params["value"] entry (wire format)
+
+        Structured laws with multi-key params (servo_limits, heartbeat_interval, etc.)
+        have dedicated helpers — do NOT use _law for those.
+
+        Always safe to call.
+        """
+        if not self.constitution:
+            return default
+        laws = self.constitution.get("laws")
+        if isinstance(laws, dict):
+            # Simplified / test / president format: laws is a plain dict
+            return laws.get(key, default)
+        if isinstance(laws, list):
+            # Wire format: list of {"id": ..., "params": {...}} dicts
+            for law in laws:
+                if law.get("id") == key:
+                    params = law.get("params") or {}
+                    return params.get("value", default)
+            return default
+        return default
 
     def _on_neighbor_joined(self, neighbor: Neighbor):
         """Override in subclass to react to new neighbors."""
@@ -815,6 +858,7 @@ class Citizen:
             saved_genome = load_genome(self.name)
             if saved_genome:
                 self.genome = saved_genome
+                self.genome.node_pubkey = self.node_pubkey  # always stamp with live node key
                 self.skill_tree.xp = dict(saved_genome.xp)
                 if saved_genome.immune_memory:
                     self.immune_memory.merge(

@@ -591,6 +591,62 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
     print(f"{GREEN}Governor offline.{RESET}")
 
 
+async def create_task_and_wait(
+    surface,                          # GovernorCitizen instance
+    task_type: str,
+    params: dict,
+    required_capabilities: list[str] | None = None,
+    required_skills: list[str] | None = None,
+    bid_window_s: float = 2.5,
+    completion_timeout_s: float = 30.0,
+) -> dict:
+    """Submit a task, wait for the marketplace to settle, return a result dict.
+
+    Returns a dict with at least:
+      task_id, winner_pubkey, winner_role, winner_node, status,
+      duration_s, follower_pubkey, follower_node.
+    Raises asyncio.TimeoutError on completion_timeout_s expiry.
+    """
+    import asyncio
+
+    task = surface.create_task(
+        task_type=task_type,
+        params=params,
+        required_capabilities=required_capabilities or [],
+        required_skills=required_skills or [],
+    )
+    # Existing marketplace.close_auction is called after bid_window_s by the
+    # governor's auction loop; we just wait for it.
+    await asyncio.sleep(bid_window_s)
+    deadline = asyncio.get_event_loop().time() + completion_timeout_s
+    while True:
+        t = surface.marketplace.tasks.get(task.id)
+        if t is None:
+            raise RuntimeError(f"task {task.id} disappeared")
+        if t.status.value in ("completed", "failed"):
+            break
+        if asyncio.get_event_loop().time() > deadline:
+            raise asyncio.TimeoutError(f"task {task.id} did not complete in {completion_timeout_s}s")
+        await asyncio.sleep(0.2)
+    # Resolve winner role/node from the marketplace's bid log + neighbor table
+    winner_pk = t.assigned_to or ""
+    nbr = None
+    if hasattr(surface, "neighbors"):
+        nbr = surface.neighbors.get(winner_pk)
+    elif hasattr(surface, "_neighbors"):
+        nbr = surface._neighbors.get(winner_pk)
+    return {
+        "task_id": t.id,
+        "winner_pubkey": winner_pk,
+        "winner_role": getattr(nbr, "citizen_type", "") if nbr else "",
+        "winner_node": getattr(nbr, "node_pubkey", "") if nbr else "",
+        "status": t.status.value,
+        "duration_s": (t.completed_at or 0.0) - t.created_at,
+        "follower_pubkey": params.get("follower_pubkey", ""),
+        "follower_node": params.get("follower_node", ""),
+    }
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Governor CLI")

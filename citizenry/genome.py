@@ -28,6 +28,7 @@ class CitizenGenome:
     xp: dict[str, int] = field(default_factory=dict)
     skill_definitions: dict[str, Any] = field(default_factory=dict)
     immune_memory: list[dict] = field(default_factory=list)
+    node_pubkey: str | None = None
     version: int = 1
     exported_at: float = field(default_factory=time.time)
     governor_signature: str = ""

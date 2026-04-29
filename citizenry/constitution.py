@@ -182,6 +182,15 @@ def default_constitution() -> Constitution:
             title="Collective Knowledge",
             text="Learned behaviors belong to the collective.",
         ),
+        Article(
+            number=6,
+            title="Policy Within Servo Limits",
+            text=(
+                "Policy citizens shall not emit action targets outside "
+                "ServoLimits. Defence in depth: ManipulatorCitizen also "
+                "clamps on ingress."
+            ),
+        ),
     ]
 
     laws = [
@@ -199,6 +208,51 @@ def default_constitution() -> Constitution:
             id="heartbeat_interval",
             description="Seconds between heartbeat pings.",
             params={"seconds": 2.0},
+        ),
+        Law(
+            id="episode_recorder_format",
+            description="Which episode recorder version is active: v1, v3, or both (transition).",
+            params={"value": "v3"},
+        ),
+        Law(
+            id="dataset.hf_repo_id",
+            description="Hugging Face Hub repo for v3 dataset uploads (e.g. user/repo). Empty disables uploads.",
+            params={"value": ""},
+        ),
+        Law(
+            id="dataset.fps",
+            description="Frames per second for v3 dataset videos.",
+            params={"value": 30},
+        ),
+        Law(
+            id="dataset.upload_after_episode",
+            description="Whether ManipulatorCitizen uploads each closed episode to HF.",
+            params={"value": True},
+        ),
+        Law(
+            id="dataset.delete_after_upload",
+            description="Whether to delete local episodes after verified HF upload.",
+            params={"value": True},
+        ),
+        Law(
+            id="dataset.retry_interval_s",
+            description="Seconds between HFUploader retry attempts.",
+            params={"value": 300},
+        ),
+        Law(
+            id="dataset.max_local_episodes",
+            description="Soft cap on local episode count before uploads-lagging warning.",
+            params={"value": 50},
+        ),
+        Law(
+            id="governor.recorder_enabled",
+            description="Whether the GovernorNode is allowed to host an episode recorder. Always false — episodes record on the follower's node.",
+            params={"value": False},
+        ),
+        Law(
+            id="policy_citizen.observation_cameras",
+            description="Two camera role names the policy uses for observation. Order matters: [primary, secondary].",
+            params={"value": ["wrist", "base"]},
         ),
     ]
 
