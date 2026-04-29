@@ -606,16 +606,14 @@ async def run_demo(surface, task_type: str = "basic_gesture/wave") -> None:
     print("=" * 60)
     print("citizenry demo — basic marketplace round")
     print("=" * 60)
-    pubkey_str = str(getattr(surface, "pubkey", "") or "")
-    print(f"\nGovernor: {surface.name} [{pubkey_str[:8]}]")
+    print(f"\nGovernor: {surface.name} [{surface.pubkey[:8]}]")
     neighbors = getattr(surface, "neighbors", {}) or {}
     print(f"\nNeighbors ({len(neighbors)}):")
     if not neighbors:
         print("  (none discovered yet — is the mesh up?)")
     for pk, n in neighbors.items():
         caps = getattr(n, "capabilities", [])
-        pk_str = str(pk)
-        print(f"  {n.name} [{pk_str[:8]}] type={getattr(n, 'citizen_type', '?')} caps={caps}")
+        print(f"  {n.name} [{pk[:8]}] type={getattr(n, 'citizen_type', '?')} caps={caps}")
     print(f"\nProposing task: {task_type!r}")
     result = await create_task_and_wait(
         surface=surface,
@@ -628,9 +626,9 @@ async def run_demo(surface, task_type: str = "basic_gesture/wave") -> None:
     for k, v in result.items():
         print(f"  {k}: {v}")
     if result["status"] == "completed":
-        print(f"\n[OK] task completed by {result['winner_role']} in {result['duration_s']:.2f}s")
+        print(f"\n{GREEN}✓{RESET} task completed by {result['winner_role']} in {result['duration_s']:.2f}s")
     else:
-        print(f"\n[FAIL] task did not complete: status={result['status']}")
+        print(f"\n{RED}✗{RESET} task did not complete: status={result['status']}")
 
 
 async def create_task_and_wait(
@@ -694,9 +692,15 @@ async def _run_demo_main(task_type: str) -> None:
     surface = GovernorCitizen()
     await surface.start()
     try:
-        # Give multicast discovery a moment to populate the neighbor table.
-        await asyncio.sleep(3.0)
+        # Poll for multicast discovery to populate the neighbor table — same
+        # 8s ceiling + 1s settle delay used by run_cli.
+        t0 = time.time()
+        while not surface.neighbors and time.time() - t0 < 8:
+            await asyncio.sleep(0.2)
+        await asyncio.sleep(1)
         await run_demo(surface, task_type=task_type)
+    except KeyboardInterrupt:
+        print("\nDemo interrupted.")
     finally:
         await surface.stop()
 
