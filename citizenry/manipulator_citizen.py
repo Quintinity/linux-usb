@@ -55,6 +55,7 @@ class ManipulatorCitizen(Citizen):
         self._governor_key: str | None = None
         self._governor_addr: tuple | None = None
         self._teleop_active = False
+        self._active_policy_pubkey: str | None = None
         self._frames_received = 0
         self._frames_written = 0
         self._last_frame_time: float = 0
@@ -80,12 +81,7 @@ class ManipulatorCitizen(Citizen):
             repo_id=self._law("dataset.hf_repo_id", default="local/citizenry-data"),
             fps=int(self._law("dataset.fps", default=30)),
         )
-        self._recorder.set_attribution(
-            node_pubkey=self.node_pubkey,
-            policy_pubkey=getattr(self, "_active_policy_pubkey", None),
-            governor_pubkey=getattr(self, "governor_pubkey", None),
-            constitution_hash=getattr(self, "constitution_hash", None),
-        )
+        self._refresh_attribution()
 
         # HF uploader — enabled when both Constitution Laws are favourable:
         #   dataset.hf_repo_id     defaults to "" (empty disables uploads)
@@ -123,6 +119,31 @@ class ManipulatorCitizen(Citizen):
                 )
                 self._log(f"HF uploader started → {repo_id} (delete={delete}, cap={cap})")
 
+    @property
+    def governor_pubkey(self) -> str | None:
+        """The pubkey of the governor we're following (None if no governor seen yet).
+
+        Surfaces ``_governor_key`` under the name used by the attribution
+        sidecar — keeps call sites readable and makes the attribute reachable
+        without ``getattr`` defensiveness.
+        """
+        return self._governor_key
+
+    def _refresh_attribution(self) -> None:
+        """Push current provenance values into the episode recorder.
+
+        Called whenever any of the four attribution fields could have changed
+        (construct, constitution received, episode begin, teleop end). The
+        recorder's ``set_attribution`` is idempotent and just stores into a
+        dict, so calling it repeatedly is cheap.
+        """
+        self._recorder.set_attribution(
+            node_pubkey=self.node_pubkey,
+            policy_pubkey=self._active_policy_pubkey,
+            governor_pubkey=self.governor_pubkey,
+            constitution_hash=self.constitution_hash,
+        )
+
     def _on_neighbor_joined(self, neighbor: Neighbor):
         """Track the governor."""
         if neighbor.citizen_type == "governor":
@@ -137,6 +158,7 @@ class ManipulatorCitizen(Citizen):
             self._add_log("SAFETY", "self", "governor dead — torque disabled")
             self._disable_torque()
             self._teleop_active = False
+            self._active_policy_pubkey = None
             self.state = "idle"
 
     def _on_constitution_received(self, sender: str, constitution: dict):
@@ -172,12 +194,7 @@ class ManipulatorCitizen(Citizen):
             pass
 
         # Refresh recorder attribution now that we have constitution keys.
-        self._recorder.set_attribution(
-            node_pubkey=self.node_pubkey,
-            policy_pubkey=getattr(self, "_active_policy_pubkey", None),
-            governor_pubkey=getattr(self, "governor_pubkey", None),
-            constitution_hash=getattr(self, "constitution_hash", None),
-        )
+        self._refresh_attribution()
 
         # Report back that we applied it
         if self._governor_key and self._governor_addr:
@@ -274,6 +291,10 @@ class ManipulatorCitizen(Citizen):
         if not positions:
             return
 
+        # Track which policy is driving us — every accepted frame's sender
+        # is the current authority over this manipulator. Stamped onto the
+        # episode attribution sidecar so recordings carry policy provenance.
+        self._active_policy_pubkey = env.sender
         self._frames_received += 1
         self._last_frame_time = time.time()
 
@@ -295,6 +316,7 @@ class ManipulatorCitizen(Citizen):
                 self._add_log("SAFETY", "watchdog", "no frames — torque disabled")
                 self._disable_torque()
                 self._teleop_active = False
+                self._active_policy_pubkey = None
                 self.state = "idle"
 
                 if self._governor_key and self._governor_addr:
@@ -845,8 +867,10 @@ class ManipulatorCitizen(Citizen):
         """Execute an assigned task with real servo movements and report results."""
         t0 = time.time()
 
-        # Begin episode recording
+        # Begin episode recording — refresh attribution first so the sidecar
+        # captures whichever policy/governor/constitution are live right now.
         episode_task = f"{task_type}/{params.get('gesture', '')}".rstrip('/')
+        self._refresh_attribution()
         self._recorder.begin_episode(episode_task, params=params)
 
         try:

@@ -234,6 +234,22 @@ class Citizen:
         self._unicast.close()
         self._log("citizen stopped")
 
+    @property
+    def constitution_hash(self) -> str | None:
+        """Stable 16-hex-char fingerprint of the active constitution.
+
+        Used by the episode recorder's attribution sidecar so each recorded
+        episode can be tied back to the exact constitution under which it
+        ran (auditable-AI provenance).
+        """
+        if not self.constitution:
+            return None
+        import hashlib
+        import json
+        return hashlib.sha256(
+            json.dumps(self.constitution, sort_keys=True).encode()
+        ).hexdigest()[:16]
+
     # ── Outbound messages ──
 
     async def _send_discover(self):
