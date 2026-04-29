@@ -111,3 +111,39 @@ def test_enforce_cap_logs_warning_when_over(tmp_path, capsys):
     uploader._enforce_cap(folder, cap=10)
     captured2 = capsys.readouterr()
     assert "exceeds cap" not in captured2.out
+
+
+def test_uploader_falls_back_to_hf_cache_token(tmp_path, monkeypatch):
+    """When ~/.citizenry/hf_token is missing, fall back to ~/.cache/huggingface/token
+    (the location populated by `huggingface-cli login`)."""
+    citizenry_token = tmp_path / "citizenry_hf_token"  # doesn't exist
+    hf_cache_token = tmp_path / "hf_cache_token"
+    hf_cache_token.write_text("hf_cli_token_value\n")  # CLI writes a trailing newline
+    monkeypatch.setattr("citizenry.hf_upload._HF_CACHE_TOKEN_PATH", str(hf_cache_token))
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    uploader = HFUploader(repo_id="user/repo", token=None, token_path=str(citizenry_token))
+    assert uploader._token == "hf_cli_token_value"
+
+
+def test_uploader_explicit_token_wins_over_files(tmp_path, monkeypatch):
+    """Explicit token arg trumps both ~/.citizenry/hf_token and the HF cache."""
+    citizenry_token = tmp_path / "ct"
+    citizenry_token.write_text("citizenry_value")
+    hf_cache_token = tmp_path / "hf"
+    hf_cache_token.write_text("hf_cache_value")
+    monkeypatch.setattr("citizenry.hf_upload._HF_CACHE_TOKEN_PATH", str(hf_cache_token))
+    monkeypatch.setenv("HF_TOKEN", "env_value")
+    uploader = HFUploader(repo_id="user/repo", token="explicit", token_path=str(citizenry_token))
+    assert uploader._token == "explicit"
+
+
+def test_uploader_citizenry_token_wins_over_cache(tmp_path, monkeypatch):
+    """~/.citizenry/hf_token takes precedence over the HF cache."""
+    citizenry_token = tmp_path / "ct"
+    citizenry_token.write_text("citizenry_value")
+    hf_cache_token = tmp_path / "hf"
+    hf_cache_token.write_text("hf_cache_value")
+    monkeypatch.setattr("citizenry.hf_upload._HF_CACHE_TOKEN_PATH", str(hf_cache_token))
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    uploader = HFUploader(repo_id="user/repo", token=None, token_path=str(citizenry_token))
+    assert uploader._token == "citizenry_value"

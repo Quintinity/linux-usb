@@ -23,6 +23,12 @@ def _read_token(path: str | None) -> str | None:
     return p.read_text().strip()
 
 
+# Standard location written by `huggingface-cli login` / `hf auth login`.
+# Picked up automatically as a fallback so users don't need to copy the token
+# into ~/.citizenry/hf_token after running the CLI flow.
+_HF_CACHE_TOKEN_PATH = "~/.cache/huggingface/token"
+
+
 class HFUploader:
     def __init__(
         self,
@@ -33,7 +39,14 @@ class HFUploader:
     ):
         self.repo_id = repo_id
         self.repo_type = repo_type
-        self._token = token or _read_token(token_path) or os.environ.get("HF_TOKEN")
+        # Token discovery order: explicit arg → ~/.citizenry/hf_token →
+        # ~/.cache/huggingface/token (huggingface-cli login output) → HF_TOKEN env.
+        self._token = (
+            token
+            or _read_token(token_path)
+            or _read_token(_HF_CACHE_TOKEN_PATH)
+            or os.environ.get("HF_TOKEN")
+        )
         self._api = HfApi(token=self._token) if self._token else None
         self._seen_mtime: dict[Path, float] = {}
 
