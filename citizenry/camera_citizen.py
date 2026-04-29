@@ -12,7 +12,13 @@ import time
 from typing import Any
 
 from .citizen import Citizen, Neighbor
-from .protocol import MessageType
+from .protocol import MessageType, TTL_HEARTBEAT, make_envelope
+
+
+# Default frame broadcast rate. 5 Hz = 200 ms. Tunable via the Constitution
+# Law `camera.broadcast_interval_s` once a constitution is ratified — see
+# `constitution.py` for the law definition.
+DEFAULT_BROADCAST_INTERVAL_S = 0.2
 
 
 class CameraCitizen(Citizen):
@@ -20,6 +26,12 @@ class CameraCitizen(Citizen):
 
     Runs on the Surface Pro 7 (or any machine with a USB camera).
     Provides frame capture on demand and color detection.
+
+    When constructed with ``camera_role`` set (e.g. "wrist", "base"), the
+    citizen continuously broadcasts JPEG frames every ~200 ms. PolicyCitizens
+    listening on the multicast group cache these frames keyed by camera_role
+    and feed them to the policy as observations. Without a role, the citizen
+    only responds to on-demand frame_capture proposals.
     """
 
     def __init__(
@@ -27,6 +39,7 @@ class CameraCitizen(Citizen):
         camera_index: int = 0,
         resolution: tuple[int, int] = (640, 480),
         name: str = "camera-sense",
+        camera_role: str | None = None,
     ):
         super().__init__(
             name=name,
@@ -35,20 +48,32 @@ class CameraCitizen(Citizen):
         )
         self.camera_index = camera_index
         self.resolution = resolution
+        self.camera_role = camera_role
         self._cap = None
         self._frame_count = 0
         self._last_frame_time: float = 0
         self._camera_ok = False
         self._pending_task: dict | None = None
+        self._broadcast_task: asyncio.Task | None = None
+        # Rate-limit "frame broadcast error" log lines so a persistently bad
+        # camera doesn't drown the log at 5 Hz.
+        self._last_broadcast_err_log: float = 0.0
 
     async def start(self):
         await super().start()
         self._init_camera()
         if self._camera_ok:
-            self._log(f"camera ready — index {self.camera_index} @ {self.resolution[0]}x{self.resolution[1]}")
+            role_str = f" role={self.camera_role}" if self.camera_role else ""
+            self._log(f"camera ready — index {self.camera_index} @ {self.resolution[0]}x{self.resolution[1]}{role_str}")
         else:
             self._log("camera not available — running in degraded mode")
             self.health = 0.5
+
+        # Periodic frame broadcast: only meaningful when a role is set, since
+        # PolicyCitizen's observation cache keys frames by camera_role. Without
+        # a role, the broadcast bandwidth is wasted (no consumer can route it).
+        if self.camera_role and self._camera_ok:
+            self._broadcast_task = asyncio.create_task(self._frame_broadcast_loop())
 
     def _init_camera(self):
         """Initialize OpenCV video capture."""
@@ -210,18 +235,20 @@ class CameraCitizen(Citizen):
 
         frame_b64 = self._capture_frame_b64()
         if frame_b64:
-            self.send_report(
-                env.sender,
-                {
-                    "type": "frame_capture",
-                    "task_id": body.get("task_id", ""),
-                    "frame": frame_b64,
-                    "width": self.resolution[0],
-                    "height": self.resolution[1],
-                    "timestamp": time.time(),
-                },
-                addr,
-            )
+            report_body: dict[str, Any] = {
+                "type": "frame_capture",
+                "task_id": body.get("task_id", ""),
+                "frame": frame_b64,
+                "width": self.resolution[0],
+                "height": self.resolution[1],
+                "timestamp": time.time(),
+            }
+            # Include camera_role so PolicyCitizen's observation cache can key
+            # this frame correctly. Omit when unset rather than sending None,
+            # so on-demand captures from role-less cameras stay clean.
+            if self.camera_role:
+                report_body["camera_role"] = self.camera_role
+            self.send_report(env.sender, report_body, addr)
         else:
             self.send_report(
                 env.sender,
@@ -344,9 +371,82 @@ class CameraCitizen(Citizen):
                 break
 
     async def stop(self):
+        # Cancel the broadcast loop first so it doesn't try to read from a
+        # capture device that we're about to release. Swallow CancelledError
+        # — that's the expected resolution of awaiting a cancelled task.
+        if self._broadcast_task is not None:
+            self._broadcast_task.cancel()
+            try:
+                await self._broadcast_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                # Don't let a buggy broadcast loop block citizen shutdown.
+                pass
+            self._broadcast_task = None
+
         if self._cap:
             try:
                 self._cap.release()
             except Exception:
                 pass
         await super().stop()
+
+    # ── Frame broadcast (continuous observation feed) ──
+
+    async def _frame_broadcast_loop(self):
+        """Periodically broadcast a JPEG frame so PolicyCitizens can fill their cache.
+
+        Runs only while ``self._running and self._camera_ok``. Reads the
+        broadcast interval from the Constitution Law
+        ``camera.broadcast_interval_s`` (default 0.2 s = 5 Hz). A bad single
+        frame is logged (rate-limited) but does not kill the loop.
+        """
+        interval = float(self._law(
+            "camera.broadcast_interval_s",
+            default=DEFAULT_BROADCAST_INTERVAL_S,
+        ))
+        # Without a role there's no point broadcasting — frames can't be
+        # cached. The start() guard already prevents this, but keep the check
+        # defensive in case the role is cleared mid-run.
+        if not self.camera_role:
+            return
+
+        while self._running and self._camera_ok:
+            try:
+                frame_b64 = self._capture_frame_b64()
+                if frame_b64 and self.camera_role:
+                    self._broadcast_frame(frame_b64)
+            except Exception as e:
+                now = time.time()
+                # Rate-limit error logging to once per 5 seconds.
+                if now - self._last_broadcast_err_log > 5.0:
+                    self._log(f"frame broadcast error: {e}")
+                    self._last_broadcast_err_log = now
+            await asyncio.sleep(interval)
+
+    def _broadcast_frame(self, frame_b64: str) -> None:
+        """Send a frame_stream REPORT to the multicast group (recipient='*').
+
+        Built directly via ``make_envelope`` + ``self._multicast.send`` to
+        match the broadcast pattern used by ``_send_advertise``. We can't use
+        ``send_report`` here because it requires a unicast addr.
+        """
+        body = {
+            "type": "frame_stream",
+            "frame": frame_b64,
+            "camera_role": self.camera_role,
+            "width": self.resolution[0],
+            "height": self.resolution[1],
+            "timestamp": time.time(),
+        }
+        env = make_envelope(
+            MessageType.REPORT,
+            self.pubkey,
+            body,
+            self._signing_key,
+            recipient="*",
+            ttl=TTL_HEARTBEAT,  # frames are ephemeral; short TTL is fine
+        )
+        self._multicast.send(env)
+        self.messages_sent += 1
