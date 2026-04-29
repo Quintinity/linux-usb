@@ -592,6 +592,47 @@ async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
     print(f"{GREEN}Governor offline.{RESET}")
 
 
+async def run_demo(surface, task_type: str = "basic_gesture/wave") -> None:
+    """End-to-end demo: print inventory, emit a task, narrate outcome.
+
+    Walks through one full marketplace round so a new operator can see what
+    the citizenry actually does:
+      1. Print the governor's identity.
+      2. Print the inventory of currently-discovered neighbors.
+      3. Emit a task to the marketplace.
+      4. Wait for the auction + execution to settle.
+      5. Narrate the outcome ("completed by <role> in Xs" or failure reason).
+    """
+    print("=" * 60)
+    print("citizenry demo — basic marketplace round")
+    print("=" * 60)
+    pubkey_str = str(getattr(surface, "pubkey", "") or "")
+    print(f"\nGovernor: {surface.name} [{pubkey_str[:8]}]")
+    neighbors = getattr(surface, "neighbors", {}) or {}
+    print(f"\nNeighbors ({len(neighbors)}):")
+    if not neighbors:
+        print("  (none discovered yet — is the mesh up?)")
+    for pk, n in neighbors.items():
+        caps = getattr(n, "capabilities", [])
+        pk_str = str(pk)
+        print(f"  {n.name} [{pk_str[:8]}] type={getattr(n, 'citizen_type', '?')} caps={caps}")
+    print(f"\nProposing task: {task_type!r}")
+    result = await create_task_and_wait(
+        surface=surface,
+        task_type=task_type,
+        params={},
+        bid_window_s=2.5,
+        completion_timeout_s=30.0,
+    )
+    print("\n--- result ---")
+    for k, v in result.items():
+        print(f"  {k}: {v}")
+    if result["status"] == "completed":
+        print(f"\n[OK] task completed by {result['winner_role']} in {result['duration_s']:.2f}s")
+    else:
+        print(f"\n[FAIL] task did not complete: status={result['status']}")
+
+
 async def create_task_and_wait(
     surface,                          # GovernorCitizen instance
     task_type: str,
@@ -648,10 +689,40 @@ async def create_task_and_wait(
     }
 
 
+async def _run_demo_main(task_type: str) -> None:
+    """Construct a fresh GovernorCitizen, let it discover neighbors, run the demo."""
+    surface = GovernorCitizen()
+    await surface.start()
+    try:
+        # Give multicast discovery a moment to populate the neighbor table.
+        await asyncio.sleep(3.0)
+        await run_demo(surface, task_type=task_type)
+    finally:
+        await surface.stop()
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Governor CLI")
+    subparsers = parser.add_subparsers(dest="cmd")
+
+    # `demo` subcommand — one-shot end-to-end marketplace round.
+    demo_parser = subparsers.add_parser(
+        "demo",
+        help="Walk through one full marketplace round end-to-end.",
+    )
+    demo_parser.add_argument(
+        "--task-type",
+        default="basic_gesture/wave",
+        help="Task type to propose (default: basic_gesture/wave).",
+    )
+
+    # Default (no subcommand) — the existing interactive REPL.
     parser.add_argument("--leader-port", default="/dev/ttyACM0")
     parser.add_argument("--fps", type=float, default=25.0)
     args = parser.parse_args()
-    asyncio.run(run_cli(args.leader_port, args.fps))
+
+    if args.cmd == "demo":
+        asyncio.run(_run_demo_main(args.task_type))
+    else:
+        asyncio.run(run_cli(args.leader_port, args.fps))
