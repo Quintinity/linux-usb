@@ -394,29 +394,63 @@ class CameraCitizen(Citizen):
 
     # ── Frame broadcast (continuous observation feed) ──
 
+    # After this many consecutive None reads from _capture_frame_b64, treat the
+    # camera as dead and exit the broadcast loop. At 5 Hz that's ~6 s of total
+    # silence — long enough to ride out a transient V4L2 buffer hiccup, short
+    # enough that PolicyCitizen's cache won't starve indefinitely.
+    DEAD_CAMERA_THRESHOLD = 30
+
+    def _resolve_broadcast_interval(self) -> float:
+        """Read the camera.broadcast_interval_s Law and floor it at 0.05 s (20 Hz).
+
+        Floored to defend against a misconfigured or adversarial Law value
+        like 0.001 that would flood the multicast group. 20 Hz × ~30 KB/frame
+        × 2 cams ≈ 1.2 MB/s is the ceiling we accept.
+        """
+        raw = float(self._law(
+            "camera.broadcast_interval_s",
+            default=DEFAULT_BROADCAST_INTERVAL_S,
+        ))
+        return max(raw, 0.05)
+
     async def _frame_broadcast_loop(self):
         """Periodically broadcast a JPEG frame so PolicyCitizens can fill their cache.
 
         Runs only while ``self._running and self._camera_ok``. Reads the
         broadcast interval from the Constitution Law
-        ``camera.broadcast_interval_s`` (default 0.2 s = 5 Hz). A bad single
-        frame is logged (rate-limited) but does not kill the loop.
+        ``camera.broadcast_interval_s`` (default 0.2 s = 5 Hz, floored to
+        0.05 s = 20 Hz). A bad single frame is logged (rate-limited) but does
+        not kill the loop. After ``DEAD_CAMERA_THRESHOLD`` consecutive None
+        reads from ``_capture_frame_b64``, the camera is treated as dead:
+        ``_camera_ok`` is cleared and the loop exits so the citizen stops
+        wasting cycles spinning on a broken device. Other citizen capabilities
+        remain alive.
         """
-        interval = float(self._law(
-            "camera.broadcast_interval_s",
-            default=DEFAULT_BROADCAST_INTERVAL_S,
-        ))
+        interval = self._resolve_broadcast_interval()
         # Without a role there's no point broadcasting — frames can't be
         # cached. The start() guard already prevents this, but keep the check
         # defensive in case the role is cleared mid-run.
         if not self.camera_role:
             return
 
+        consecutive_none = 0
+
         while self._running and self._camera_ok:
             try:
                 frame_b64 = self._capture_frame_b64()
-                if frame_b64 and self.camera_role:
-                    self._broadcast_frame(frame_b64)
+                if frame_b64:
+                    consecutive_none = 0
+                    if self.camera_role:
+                        self._broadcast_frame(frame_b64)
+                else:
+                    consecutive_none += 1
+                    if consecutive_none >= self.DEAD_CAMERA_THRESHOLD:
+                        self._log(
+                            f"camera dead after {consecutive_none} consecutive "
+                            "failed reads — stopping frame broadcast"
+                        )
+                        self._camera_ok = False
+                        return
             except Exception as e:
                 now = time.time()
                 # Rate-limit error logging to once per 5 seconds.

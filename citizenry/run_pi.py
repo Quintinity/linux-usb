@@ -79,20 +79,25 @@ async def _spawn_leader_citizen(citizens: dict, port: str):
         print(f"[hardware] Failed leader on {port}: {e}")
 
 
-def _camera_role_for_index(idx: int) -> str | None:
-    """Map a 0-based camera enumeration index to a SmolVLA observation role.
+def _camera_role_for_path(path: str) -> str | None:
+    """Map a /dev/videoN device path to a SmolVLA observation role.
 
     Mirrors the default `policy_citizen.observation_cameras` Law ordering:
-    1st detected → "wrist", 2nd → "base". Extra cameras get no role and
-    therefore won't broadcast a frame_stream — they remain available for
-    on-demand frame_capture proposals.
+    /dev/video0 → "wrist", /dev/video1 → "base". Other paths get no role
+    and therefore won't broadcast a frame_stream — they remain available
+    for on-demand frame_capture proposals.
+
+    Path-based (rather than enumeration-index based) so the assignment is
+    STABLE across hotplug cycles. If /dev/video0 is unplugged then replugged,
+    it still gets role="wrist" — not whatever the leftover-citizen count
+    happens to suggest at the moment the hotplug fires.
     """
-    roles = ["wrist", "base"]
-    return roles[idx] if idx < len(roles) else None
+    mapping = {"/dev/video0": "wrist", "/dev/video1": "base"}
+    return mapping.get(path)
 
 
-async def _spawn_camera_citizen(citizens: dict, cam, name: str, idx: int = 0):
-    role = _camera_role_for_index(idx)
+async def _spawn_camera_citizen(citizens: dict, cam, name: str):
+    role = _camera_role_for_path(cam.path)
     role_str = f" role={role}" if role else " (no role; on-demand only)"
     print(f"[hardware] USB camera: {cam.path} → {name}{role_str}")
     try:
@@ -147,7 +152,7 @@ async def _run_auto_detect(leader_port: str | None = None):
     usb_cams = [c for c in hw.cameras if c.kind == "usb"]
     for i, cam in enumerate(usb_cams):
         name = f"pi-camera-{i}" if len(usb_cams) > 1 else "pi-camera"
-        await _spawn_camera_citizen(citizens, cam, name, idx=i)
+        await _spawn_camera_citizen(citizens, cam, name)
 
     # Optional leader arm (e.g. Pi acting as both leader and follower node)
     if leader_port:
@@ -191,8 +196,11 @@ async def _hotplug_loop(citizens: dict, stop_event: asyncio.Event, last_hw: Hard
             for cam in delta.cameras_added:
                 if cam.kind != "usb":
                     continue  # CSI cams ride on the brain's hw map
+                # Name uses live-citizen count (cosmetic); role is derived from
+                # the device path inside _spawn_camera_citizen so it remains
+                # stable across remove+add cycles of the same /dev/videoN.
                 idx = sum(1 for c in citizens.values() if isinstance(c, CameraCitizen))
-                await _spawn_camera_citizen(citizens, cam, f"pi-camera-{idx}", idx=idx)
+                await _spawn_camera_citizen(citizens, cam, f"pi-camera-{idx}")
             for cam in delta.cameras_removed:
                 if cam.kind != "usb":
                     continue

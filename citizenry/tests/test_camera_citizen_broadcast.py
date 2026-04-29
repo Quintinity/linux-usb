@@ -162,3 +162,101 @@ def test_init_default_camera_role_is_none():
 def test_init_accepts_camera_role():
     cam = CameraCitizen(name="test-cam", camera_role="base")
     assert cam.camera_role == "base"
+
+
+# ── Dead-camera back-off (Fix 1) ──
+
+
+@pytest.mark.asyncio
+async def test_broadcast_loop_exits_on_dead_camera(monkeypatch):
+    """If _capture_frame_b64 returns None on every poll (camera unplug, V4L2
+    buffer error, etc.), the broadcast loop must give up rather than spin
+    forever emitting nothing. After DEAD_CAMERA_THRESHOLD consecutive None
+    reads, _camera_ok flips to False and the loop returns. Without this
+    safeguard, PolicyCitizen's observation cache starves silently and no log
+    line ever fires."""
+    cam = CameraCitizen(name="test-cam", camera_role="wrist")
+    cam._running = True
+    cam._camera_ok = True
+
+    # Always-None capture simulates a dead camera.
+    monkeypatch.setattr(cam, "_capture_frame_b64", lambda: None)
+
+    sent: list[str] = []
+
+    def fake_broadcast(frame_b64: str) -> None:
+        sent.append(frame_b64)
+
+    monkeypatch.setattr(cam, "_broadcast_frame", fake_broadcast)
+    # Tight interval so the loop hits the threshold quickly.
+    monkeypatch.setattr(cam, "_law", lambda key, default=None: 0.001)
+
+    # Loop should exit on its own once the threshold is hit. Give it generous
+    # wall-time headroom even though the spin should be ~30 iterations × 0.05
+    # (the floored interval) = ~1.5 s. wait_for that returns normally proves
+    # the loop did exit (rather than running forever).
+    await asyncio.wait_for(cam._frame_broadcast_loop(), timeout=5.0)
+
+    assert cam._camera_ok is False, \
+        "loop must clear _camera_ok when it gives up on a dead camera"
+    assert sent == [], \
+        f"dead camera must produce no frame broadcasts, got: {sent}"
+
+
+# ── Broadcast interval floor (Fix 3) ──
+
+
+def test_broadcast_interval_floored_at_20hz(monkeypatch):
+    """A misconfigured Law value of 0.001 s would mean 1000 Hz broadcasts —
+    flooding the multicast group. _resolve_broadcast_interval must floor at
+    0.05 s (20 Hz) regardless of how small the Law value is."""
+    cam = CameraCitizen(name="test-cam", camera_role="wrist")
+
+    monkeypatch.setattr(cam, "_law", lambda key, default=None: 0.001)
+    interval = cam._resolve_broadcast_interval()
+    assert interval >= 0.05, \
+        f"broadcast interval must be floored at 0.05 s, got: {interval}"
+    assert interval == 0.05
+
+
+def test_broadcast_interval_passes_through_above_floor(monkeypatch):
+    """A reasonable Law value (e.g. 0.5 s = 2 Hz) must pass through the floor
+    unchanged. The floor only kicks in for adversarially small values."""
+    cam = CameraCitizen(name="test-cam", camera_role="wrist")
+
+    monkeypatch.setattr(cam, "_law", lambda key, default=None: 0.5)
+    assert cam._resolve_broadcast_interval() == 0.5
+
+
+# ── Envelope round-trip (Fix 4) ──
+
+
+def test_broadcast_envelope_carries_camera_role(monkeypatch):
+    """End-to-end check that _broadcast_frame builds an envelope with the
+    right body shape and the right recipient. The other 6 tests in this file
+    monkey-patch _broadcast_frame, so without this round-trip test a future
+    edit that drops `camera_role` (or `frame`, or sets recipient wrong) would
+    pass the suite while breaking the wire."""
+    cam = CameraCitizen(name="test-cam", camera_role="wrist")
+
+    sent: list = []
+
+    def fake_send(env):
+        sent.append(env)
+
+    # Minimal stub for _multicast.send so we don't need a real socket.
+    cam._multicast = MagicMock()
+    cam._multicast.send.side_effect = fake_send
+
+    cam._broadcast_frame("FAKEB64")
+
+    assert len(sent) == 1, "exactly one envelope must be sent"
+    env = sent[0]
+    assert env.body["type"] == "frame_stream", \
+        f"envelope type must be frame_stream, got: {env.body.get('type')}"
+    assert env.body["camera_role"] == "wrist", \
+        f"envelope must carry camera_role='wrist', got: {env.body}"
+    assert env.body["frame"] == "FAKEB64", \
+        f"envelope must carry frame body, got: {env.body}"
+    assert env.recipient == "*", \
+        f"frame_stream must broadcast (recipient='*'), got: {env.recipient}"

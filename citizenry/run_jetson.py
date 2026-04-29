@@ -20,6 +20,7 @@ from .leader_citizen import LeaderCitizen
 from .manipulator_citizen import ManipulatorCitizen
 from .camera_citizen import CameraCitizen
 from .policy_citizen import PolicyCitizen
+from .run_pi import _camera_role_for_path
 from .smolvla_runner import SmolVLARunner
 from .survey import HardwareMap, survey_hardware
 
@@ -63,18 +64,17 @@ async def main(args):
                 await mc.start()
                 citizens[f"manipulator:{bus.port}"] = mc
 
-    # USB cameras. Assign roles by enumeration order so the first two cameras
-    # advertise themselves as "wrist" and "base" — matching the default
-    # policy_citizen.observation_cameras Law. Extra cameras get no role and
+    # USB cameras. Roles are derived from the device path so /dev/video0 →
+    # "wrist" and /dev/video1 → "base", matching the default
+    # policy_citizen.observation_cameras Law. Path-based mapping keeps role
+    # assignment stable across hotplug cycles. Extra cameras get no role and
     # only respond to on-demand frame_capture proposals (no continuous
     # broadcast).
-    roles = ["wrist", "base"]
-    cam_enum_idx = 0
     for cam in hw.cameras:
         if cam.kind == "usb":
             try:
                 idx = int(cam.path.replace("/dev/video", ""))
-                role = roles[cam_enum_idx] if cam_enum_idx < len(roles) else None
+                role = _camera_role_for_path(cam.path)
                 cc = CameraCitizen(
                     camera_index=idx,
                     name=f"jetson-cam-{idx}",
@@ -82,7 +82,6 @@ async def main(args):
                 )
                 await cc.start()
                 citizens[cam.path] = cc
-                cam_enum_idx += 1
             except Exception as e:
                 print(f"[hardware] camera {cam.path} failed: {e}")
 
