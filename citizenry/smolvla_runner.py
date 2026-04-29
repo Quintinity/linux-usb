@@ -17,7 +17,12 @@ def _load_smolvla_policy(model_id: str, device: str = "cuda"):
     Defers the heavy lerobot import until the runner is actually loaded —
     means unit tests that patch this function never touch torch/lerobot.
     """
-    from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+    # lerobot 0.4.x flattened the package — policies live at lerobot.policies.*.
+    # Earlier versions / some forks still use lerobot.common.policies.*.
+    try:
+        from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+    except ModuleNotFoundError:
+        from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy  # legacy fallback
     return SmolVLAPolicy.from_pretrained(model_id).to(device).eval()
 
 
