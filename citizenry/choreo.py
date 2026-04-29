@@ -10,7 +10,8 @@ import asyncio
 import math
 import time
 
-from .surface_citizen import SurfaceCitizen, MOTOR_NAMES
+from .governor_citizen import GovernorCitizen
+from .manipulator_citizen import MOTOR_NAMES
 
 # ── Poses (raw STS3215 position values, 0-4095, center ~2048) ──
 
@@ -129,8 +130,8 @@ async def run_choreo(leader_port="/dev/ttyACM0", fps=30.0):
     leader_bus = FeetechMotorsBus(port=leader_port, motors=motors)
     leader_bus.connect()
 
-    # Start the citizenry — Surface reads the leader arm, Pi follows
-    surface = SurfaceCitizen(leader_port=leader_port, teleop_fps=fps)
+    # Start the citizenry — governor orchestrates; leader arm is a separate LeaderCitizen process.
+    surface = GovernorCitizen()
 
     # Override leader bus init to share our bus
     surface._init_leader_bus = lambda: leader_bus

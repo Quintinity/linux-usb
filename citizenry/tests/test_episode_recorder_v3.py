@@ -5,12 +5,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from citizenry.episode_recorder import EpisodeRecorderV3
+from citizenry.episode_recorder import EpisodeRecorder as EpisodeRecorderV3
 
 
 @pytest.fixture
 def recorder(tmp_path):
-    return EpisodeRecorderV3(
+    return EpisodeRecorderV3(  # aliased to EpisodeRecorder above
         output_root=tmp_path / "v3",
         repo_id="test/local",
         fps=30,

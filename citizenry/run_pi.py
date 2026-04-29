@@ -3,7 +3,7 @@
 
 Surveys local hardware on startup, always spawns a brain citizen so the Pi
 participates in the country regardless of what's plugged in, and additionally
-spawns hardware-specific citizens (PiCitizen per servo bus, CameraCitizen per
+spawns hardware-specific citizens (ManipulatorCitizen per servo bus, CameraCitizen per
 USB camera). A hotplug loop re-surveys every 3s and reacts to deltas: spawns
 new citizens for added devices, stops them for removed ones, and triggers a
 mid-life ADVERTISE so the brain's capabilities propagate immediately.
@@ -22,9 +22,6 @@ from .leader_citizen import LeaderCitizen
 from .camera_citizen import CameraCitizen
 from .citizen import Citizen
 from .survey import HardwareMap, project_capabilities, survey_hardware
-
-# Legacy alias kept for isinstance checks during transition
-PiCitizen = ManipulatorCitizen
 
 
 async def main(args):
@@ -172,7 +169,7 @@ async def _hotplug_loop(citizens: dict, stop_event: asyncio.Event, last_hw: Hard
             print(f"[hotplug] survey delta: {delta.summary()}")
 
             for bus in delta.servo_buses_added:
-                idx = sum(1 for c in citizens.values() if isinstance(c, PiCitizen))
+                idx = sum(1 for c in citizens.values() if isinstance(c, ManipulatorCitizen))
                 await _spawn_servo_citizen(citizens, bus, current, f"pi-arm-{idx}")
             for bus in delta.servo_buses_removed:
                 await _stop_citizen(citizens, bus.port, "Servo")

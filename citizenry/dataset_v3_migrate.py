@@ -23,7 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .episode_recorder import EpisodeRecorderV3
+from .episode_recorder import EpisodeRecorder as EpisodeRecorderV3
 
 
 def _discover_legacy_episodes(roots: list[Path]) -> list[Path]:

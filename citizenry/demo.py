@@ -6,7 +6,7 @@ Runs the full protocol stack: discovery, constitution, teleop, telemetry.
 
 import asyncio
 import time
-from .surface_citizen import SurfaceCitizen
+from .governor_citizen import GovernorCitizen
 
 BOLD = "\033[1m"
 GREEN = "\033[32m"
@@ -23,7 +23,8 @@ def bar(pct, width=20):
 
 
 async def run_demo(leader_port="/dev/ttyACM0", fps=30.0):
-    surface = SurfaceCitizen(leader_port=leader_port, teleop_fps=fps)
+    # Note: leader arm is now a separate LeaderCitizen process; this demo is governor-only.
+    surface = GovernorCitizen()
     await surface.start()
 
     print()

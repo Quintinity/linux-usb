@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from .citizen import Citizen, Neighbor, Presence
-from .episode_recorder import EpisodeRecorderV3
+from .episode_recorder import EpisodeRecorder
 from .protocol import MessageType, make_envelope
 from .marketplace import compute_bid_score, Task
 from .skills import default_manipulator_skills
@@ -68,34 +68,24 @@ class ManipulatorCitizen(Citizen):
         self._current_task_id: str | None = None
         self._current_task_type: str | None = None
 
-        # Episode recorder v3 — constructed when the law says "v3" or "both".
-        # _law() returns the default ("v3") when no constitution has been ratified.
-        #
-        # Design: "always record locally, upload only when configured" (Option B).
-        #   - The recorder uses repo_id="local/citizenry-data" as a fallback so
-        #     episodes always land on disk even before a constitution is ratified.
-        #   - The HF uploader (created in start()) uses default="" so it only
-        #     activates when the governor explicitly sets dataset.hf_repo_id to a
-        #     real Hugging Face repo.  This split is intentional: local storage is
-        #     free, cloud uploads require credentials and bandwidth consent.
-        #   - _on_constitution_received updates recorder attribution (policy key,
-        #     governor key) when a new constitution arrives, but does NOT recreate
-        #     the recorder just because dataset.hf_repo_id changed — the uploader
-        #     in start() picks up the live law value at launch time.
-        self._recorder_v3: EpisodeRecorderV3 | None = None
-        fmt = self._law("episode_recorder_format", default="v3")
-        if fmt in ("v3", "both"):
-            self._recorder_v3 = EpisodeRecorderV3(
-                output_root=Path.home() / "citizenry-datasets" / "v3",
-                repo_id=self._law("dataset.hf_repo_id", default="local/citizenry-data"),
-                fps=int(self._law("dataset.fps", default=30)),
-            )
-            self._recorder_v3.set_attribution(
-                node_pubkey=self.node_pubkey,
-                policy_pubkey=getattr(self, "_active_policy_pubkey", None),
-                governor_pubkey=getattr(self, "governor_pubkey", None),
-                constitution_hash=getattr(self, "constitution_hash", None),
-            )
+        # Episode recorder — always record locally; upload only when configured.
+        #   - Uses repo_id="local/citizenry-data" as fallback so episodes always
+        #     land on disk even before a constitution is ratified.
+        #   - The HF uploader (created in start()) only activates when the governor
+        #     sets dataset.hf_repo_id to a real Hugging Face repo.
+        #   - _on_constitution_received updates attribution (policy/governor keys)
+        #     when a new constitution arrives.
+        self._recorder = EpisodeRecorder(
+            output_root=Path.home() / "citizenry-datasets" / "v3",
+            repo_id=self._law("dataset.hf_repo_id", default="local/citizenry-data"),
+            fps=int(self._law("dataset.fps", default=30)),
+        )
+        self._recorder.set_attribution(
+            node_pubkey=self.node_pubkey,
+            policy_pubkey=getattr(self, "_active_policy_pubkey", None),
+            governor_pubkey=getattr(self, "governor_pubkey", None),
+            constitution_hash=getattr(self, "constitution_hash", None),
+        )
 
         # HF uploader — enabled when both Constitution Laws are favourable:
         #   dataset.hf_repo_id     defaults to "" (empty disables uploads)
@@ -115,14 +105,14 @@ class ManipulatorCitizen(Citizen):
         # Start HF upload watcher if configured.
         if self._law("dataset.upload_after_episode", default=True):
             repo_id = self._law("dataset.hf_repo_id", default="")
-            if repo_id and self._recorder_v3 is not None:
+            if repo_id:
                 from .hf_upload import HFUploader
                 delete = self._law("dataset.delete_after_upload", default=True)
                 cap = int(self._law("dataset.max_local_episodes", default=50))
                 retry_interval = float(self._law("dataset.retry_interval_s", default=300))
                 self._uploader = HFUploader(repo_id=repo_id)
-                repo_safe = self._recorder_v3.repo_id.replace("/", "__")
-                dataset_root = self._recorder_v3.output_root / repo_safe
+                repo_safe = self._recorder.repo_id.replace("/", "__")
+                dataset_root = self._recorder.output_root / repo_safe
                 self._uploader_task = asyncio.create_task(
                     self._uploader.watch(
                         dataset_root,
@@ -181,29 +171,13 @@ class ManipulatorCitizen(Citizen):
         except Exception:
             pass
 
-        # Re-read episode_recorder_format law and (re-)initialize v3 recorder
-        # after constitution ratification, in case the law changed.
-        fmt = self._law("episode_recorder_format", default="v3")
-        if fmt in ("v3", "both"):
-            if self._recorder_v3 is None:
-                self._recorder_v3 = EpisodeRecorderV3(
-                    output_root=Path.home() / "citizenry-datasets" / "v3",
-                    repo_id=self._law("dataset.hf_repo_id", default="local/citizenry-data"),
-                    fps=int(self._law("dataset.fps", default=30)),
-                )
-            self._recorder_v3.set_attribution(
-                node_pubkey=self.node_pubkey,
-                policy_pubkey=getattr(self, "_active_policy_pubkey", None),
-                governor_pubkey=getattr(self, "governor_pubkey", None),
-                constitution_hash=getattr(self, "constitution_hash", None),
-            )
-        elif fmt == "v1":
-            # Law changed to v1-only; retire the v3 recorder (close any open episode first)
-            if self._recorder_v3 is not None and self._recorder_v3._open_episode_id is not None:
-                self._recorder_v3.close_episode(success=False, notes="recorder retired by law change")
-            self._recorder_v3 = None
-        elif fmt not in ("v1", "v3", "both"):
-            self._log(f"unknown episode_recorder_format: {fmt!r} — keeping current recorder state")
+        # Refresh recorder attribution now that we have constitution keys.
+        self._recorder.set_attribution(
+            node_pubkey=self.node_pubkey,
+            policy_pubkey=getattr(self, "_active_policy_pubkey", None),
+            governor_pubkey=getattr(self, "governor_pubkey", None),
+            constitution_hash=getattr(self, "constitution_hash", None),
+        )
 
         # Report back that we applied it
         if self._governor_key and self._governor_addr:
@@ -871,15 +845,9 @@ class ManipulatorCitizen(Citizen):
         """Execute an assigned task with real servo movements and report results."""
         t0 = time.time()
 
-        # Begin episode recording with camera
+        # Begin episode recording
         episode_task = f"{task_type}/{params.get('gesture', '')}".rstrip('/')
-        self.episode_recorder.begin_episode(
-            episode_task,
-            params=params,
-            camera_index=0,  # Try to use camera on Pi
-        )
-        if self._recorder_v3 is not None:
-            self._recorder_v3.begin_episode(episode_task, params=params)
+        self._recorder.begin_episode(episode_task, params=params)
 
         try:
             self._log(f"executing task: [{task_id}] {task_type}")
@@ -887,24 +855,17 @@ class ManipulatorCitizen(Citizen):
             # Record initial state
             positions = self._read_all_positions()
             currents = self._read_all_currents()
-            self.episode_recorder.record_frame(
-                joint_positions=positions,
-                action_positions=positions,
-                joint_currents=currents,
+            self._recorder.record_frame(
+                frame_index=0,
+                timestamp=0.0,
+                image=np.zeros((96, 128, 3), dtype=np.uint8),
+                joint_positions=list(positions.values()) if isinstance(positions, dict) else (positions or []),
+                joint_currents=currents or [],
+                joint_temperatures=[],
+                joint_loads=[],
+                action_positions=list(positions.values()) if isinstance(positions, dict) else (positions or []),
                 reward=0.0,
             )
-            if self._recorder_v3 is not None:
-                self._recorder_v3.record_frame(
-                    frame_index=0,
-                    timestamp=0.0,
-                    image=np.zeros((96, 128, 3), dtype=np.uint8),
-                    joint_positions=list(positions.values()) if isinstance(positions, dict) else (positions or []),
-                    joint_currents=currents or [],
-                    joint_temperatures=[],
-                    joint_loads=[],
-                    action_positions=list(positions.values()) if isinstance(positions, dict) else (positions or []),
-                    reward=0.0,
-                )
 
             if task_type == "basic_gesture":
                 await self._exec_gesture(params)
@@ -918,27 +879,18 @@ class ManipulatorCitizen(Citizen):
             # Record final state
             final_positions = self._read_all_positions()
             final_currents = self._read_all_currents()
-            self.episode_recorder.record_frame(
-                joint_positions=final_positions,
-                action_positions=final_positions,
-                joint_currents=final_currents,
+            fp_list = list(final_positions.values()) if isinstance(final_positions, dict) else (final_positions or [])
+            self._recorder.record_frame(
+                frame_index=self._recorder.frame_count,
+                timestamp=(time.time() - t0),
+                image=np.zeros((96, 128, 3), dtype=np.uint8),
+                joint_positions=fp_list,
+                joint_currents=final_currents or [],
+                joint_temperatures=[],
+                joint_loads=[],
+                action_positions=fp_list,
                 reward=1.0,
             )
-            if self._recorder_v3 is not None:
-                fp_list = list(final_positions.values()) if isinstance(final_positions, dict) else (final_positions or [])
-                v3_frame_idx = self._recorder_v3.frame_count
-                v3_ts = (time.time() - t0)
-                self._recorder_v3.record_frame(
-                    frame_index=v3_frame_idx,
-                    timestamp=v3_ts,
-                    image=np.zeros((96, 128, 3), dtype=np.uint8),
-                    joint_positions=fp_list,
-                    joint_currents=final_currents or [],
-                    joint_temperatures=[],
-                    joint_loads=[],
-                    action_positions=fp_list,
-                    reward=1.0,
-                )
 
             duration_ms = int((time.time() - t0) * 1000)
             skill_name = task_type if task_type in self.skill_tree.definitions else "basic_movement"
@@ -946,18 +898,12 @@ class ManipulatorCitizen(Citizen):
             xp_earned = self.skill_tree.award_xp(skill_name, base_xp=10, task_difficulty=0.8, success_quality=quality)
 
             # End episode as success
-            self.episode_recorder.end_episode(
+            await asyncio.to_thread(
+                self._recorder.close_episode,
                 success=True,
                 notes=f"{task_type} {duration_ms}ms +{xp_earned}XP",
-                final_reward=1.0,
+                duration_s=duration_ms / 1000.0,
             )
-            if self._recorder_v3 is not None:
-                await asyncio.to_thread(
-                    self._recorder_v3.close_episode,
-                    success=True,
-                    notes=f"{task_type} {duration_ms}ms +{xp_earned}XP",
-                    duration_s=duration_ms / 1000.0,
-                )
 
             self.send_report(
                 governor_key,
@@ -968,18 +914,17 @@ class ManipulatorCitizen(Citizen):
                     "duration_ms": duration_ms,
                     "xp_earned": xp_earned,
                     "citizen": self.name,
-                    "episode_id": self.episode_recorder._episode_count,
+                    "episode_dir": str(self._recorder.last_episode_dir),
                 },
                 governor_addr,
             )
-            self._log(f"task complete: [{task_id}] {duration_ms}ms +{xp_earned} XP (episode {self.episode_recorder._episode_count})")
+            self._log(f"task complete: [{task_id}] {duration_ms}ms +{xp_earned} XP")
             self._on_task_completed(task_type, skill_name, True, duration_ms)
         except Exception as e:
             self._log(f"task failed: [{task_id}] {e}")
-            self.episode_recorder.end_episode(success=False, notes=str(e))
-            if self._recorder_v3 is not None and self._recorder_v3._open_episode_id is not None:
+            if self._recorder._open_episode_id is not None:
                 await asyncio.to_thread(
-                    self._recorder_v3.close_episode,
+                    self._recorder.close_episode,
                     success=False,
                     notes=str(e),
                 )
@@ -1112,28 +1057,21 @@ class ManipulatorCitizen(Citizen):
             self._write_positions(pose)
 
             # Record frame during movement (every few steps)
-            if self.episode_recorder.is_recording and i % record_every == 0:
+            if self._recorder._open_episode_id is not None and i % record_every == 0:
                 actual = self._read_all_positions()
-                self.episode_recorder.record_frame(
-                    joint_positions=actual or pose,
-                    action_positions=pose,
+                actual_list = list(actual.values()) if isinstance(actual, dict) and actual else list(pose.values())
+                pose_list = list(pose.values())
+                self._recorder.record_frame(
+                    frame_index=self._recorder.frame_count,
+                    timestamp=float(i) / steps * duration,
+                    image=np.zeros((96, 128, 3), dtype=np.uint8),
+                    joint_positions=actual_list,
+                    joint_currents=[],
+                    joint_temperatures=[],
+                    joint_loads=[],
+                    action_positions=pose_list,
                     reward=0.5,
                 )
-                if self._recorder_v3 is not None and self._recorder_v3._open_episode_id is not None:
-                    actual_list = list(actual.values()) if isinstance(actual, dict) and actual else list(pose.values())
-                    pose_list = list(pose.values())
-                    v3_idx = self._recorder_v3.frame_count
-                    self._recorder_v3.record_frame(
-                        frame_index=v3_idx,
-                        timestamp=float(i) / steps * duration,
-                        image=np.zeros((96, 128, 3), dtype=np.uint8),
-                        joint_positions=actual_list,
-                        joint_currents=[],
-                        joint_temperatures=[],
-                        joint_loads=[],
-                        action_positions=pose_list,
-                        reward=0.5,
-                    )
 
             await asyncio.sleep(duration / steps)
 

@@ -39,7 +39,6 @@ from .pain import PainMemory, PainEvent, compute_pain_intensity
 from .sleep_cycle import SleepEngine
 from .spatial import ZoneManager
 from .growth import GrowthTracker
-from .episode_recorder import EpisodeRecorder
 
 
 class Presence(Enum):
@@ -159,7 +158,6 @@ class Citizen:
         self.sleep_engine = SleepEngine()
         self.zone_manager = ZoneManager()
         self.growth_tracker = GrowthTracker()
-        self.episode_recorder = EpisodeRecorder(citizen_name=name)
 
         # Message handlers — subclasses register additional handlers
         self._handlers: dict[int, list] = {

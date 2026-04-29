@@ -26,13 +26,13 @@ import asyncio
 import sys
 import time
 
-from .surface_citizen import SurfaceCitizen
+from .governor_citizen import GovernorCitizen
 from .nl_governance import GovernorAide, parse_command
 from .marketplace import TaskStatus
 from .data_collection import DataCollector
 from .web_dashboard import WebDashboard
 from .recorder import TimelineRecorder, list_sessions
-from .episode_recorder import list_episodes, get_episode_summary
+from .episode_recorder import list_episodes, get_episode_summary  # legacy v1 browsing helpers
 from .learning_loop import get_learning_report, analyze_recent_episodes
 from .dialogue import parse_question, compose_response, CitizenVoice
 from .president import President, GovernorRecord, parse_president_command
@@ -46,7 +46,7 @@ DIM = "\033[2m"
 RESET = "\033[0m"
 
 
-def print_status(surface: SurfaceCitizen):
+def print_status(surface: GovernorCitizen):
     """Print current neighborhood status."""
     print(f"\n{BOLD}Neighborhood ({1 + len(surface.neighbors)} citizens):{RESET}")
     print(f"  {GREEN}●{RESET} {surface.name} [{surface.short_id}] (governor)")
@@ -63,7 +63,7 @@ def print_status(surface: SurfaceCitizen):
     print(f"  Messages: {surface.messages_sent} sent / {surface.messages_received} rx")
 
 
-def print_tasks(surface: SurfaceCitizen):
+def print_tasks(surface: GovernorCitizen):
     """Print task status."""
     active = surface.marketplace.get_active_tasks()
     completed = surface.marketplace.completed_tasks
@@ -90,7 +90,7 @@ def print_tasks(surface: SurfaceCitizen):
         print(f"  {DIM}No tasks yet{RESET}")
 
 
-def print_skills(surface: SurfaceCitizen):
+def print_skills(surface: GovernorCitizen):
     """Print skill tree status."""
     print(f"\n{BOLD}Skills:{RESET}")
     unlocked = surface.skill_tree.unlocked_skills()
@@ -104,7 +104,8 @@ def print_skills(surface: SurfaceCitizen):
 
 
 async def run_cli(leader_port: str = "/dev/ttyACM0", fps: float = 25.0):
-    surface = SurfaceCitizen(leader_port=leader_port, teleop_fps=fps)
+    # Note: leader arm is now a separate LeaderCitizen process; governor is governor-only.
+    surface = GovernorCitizen()
     await surface.start()
 
     # Wait for neighbors
