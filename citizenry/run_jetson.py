@@ -63,14 +63,26 @@ async def main(args):
                 await mc.start()
                 citizens[f"manipulator:{bus.port}"] = mc
 
-    # USB cameras
+    # USB cameras. Assign roles by enumeration order so the first two cameras
+    # advertise themselves as "wrist" and "base" — matching the default
+    # policy_citizen.observation_cameras Law. Extra cameras get no role and
+    # only respond to on-demand frame_capture proposals (no continuous
+    # broadcast).
+    roles = ["wrist", "base"]
+    cam_enum_idx = 0
     for cam in hw.cameras:
         if cam.kind == "usb":
             try:
                 idx = int(cam.path.replace("/dev/video", ""))
-                cc = CameraCitizen(camera_index=idx, name=f"jetson-cam-{idx}")
+                role = roles[cam_enum_idx] if cam_enum_idx < len(roles) else None
+                cc = CameraCitizen(
+                    camera_index=idx,
+                    name=f"jetson-cam-{idx}",
+                    camera_role=role,
+                )
                 await cc.start()
                 citizens[cam.path] = cc
+                cam_enum_idx += 1
             except Exception as e:
                 print(f"[hardware] camera {cam.path} failed: {e}")
 
