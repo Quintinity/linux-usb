@@ -25,6 +25,7 @@ Voice rules: NZ English; plain language; no hype; reference customer is anonymis
 
 | Task | File | Purpose | Audience |
 |---|---|---|---|
+| T23 | [`T23-hot-swap-procedure.md`](T23-hot-swap-procedure.md) | Cell 2 triplet hot-swap procedure (SO-101 + Pi + XIAO) — ≤ 8 min target, two-person ideal | Bradley + Philippe on stand |
 | T34 | [`T34-stand-video-script.md`](T34-stand-video-script.md) | 60-second loop video shooting script — shot-by-shot, mute-friendly | Videographer + Bradley |
 | T39 | [`T39-stand-setup-checklist.md`](T39-stand-setup-checklist.md) | AV/power/network setup checklist — pre-flight, day-before, show-morning, end-of-day, pack-down | Bradley + Philippe on stand |
 | T40 | [`T40-spare-hardware-checklist.md`](T40-spare-hardware-checklist.md) | Spare hardware/cables/peripherals packing list with hot-swap targets | Bradley packing the kit |
