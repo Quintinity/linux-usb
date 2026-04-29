@@ -12,6 +12,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from citizenry.manipulator_citizen import ManipulatorCitizen
@@ -87,6 +88,60 @@ def test_attribution_sidecar_carries_real_pubkeys(tmp_path, monkeypatch):
     assert attrib["constitution_hash"] == expected_hash
     # All four fields are non-null — the auditable-AI invariant.
     assert all(v is not None for v in attrib.values())
+
+
+def test_attribution_sidecar_persists_to_disk_with_real_pubkeys(tmp_path, monkeypatch):
+    """attribution.json on disk carries all four fields after a real episode close.
+
+    Goes through the actual JSON write path in ``EpisodeRecorder.close_episode``
+    (episode_recorder.py lines 162-168) — exercises real begin/record/close
+    instead of just the in-memory ``_attribution`` dict.
+    """
+    m = _make_manipulator(tmp_path, monkeypatch)
+
+    policy_pk = "cd" * 32
+    governor_pk = "ef" * 32
+    const = {"version": 1, "laws": [{"id": "dataset.fps", "params": {"value": 30}}]}
+
+    m._active_policy_pubkey = policy_pk
+    m._governor_key = governor_pk
+    m.constitution = const
+    m._refresh_attribution()
+
+    rec = m._recorder
+    rec.begin_episode("teleop", {"target": "red_block"})
+    rec.record_frame(
+        frame_index=0,
+        timestamp=0.0,
+        image=np.zeros((96, 128, 3), dtype=np.uint8),
+        joint_positions=[100, 200, 300, 400, 500, 600],
+        joint_currents=[0.0] * 6,
+        joint_temperatures=[40.0] * 6,
+        joint_loads=[0.1] * 6,
+        action_positions=[100, 200, 300, 400, 500, 600],
+        reward=0.0,
+    )
+    rec.close_episode(success=True, notes="ok", duration_s=0.0)
+
+    # Sidecar lives at <output_root>/<repo_safe>/attribution.json (not under
+    # the chunk dir — it's per-recorder).
+    repo_safe = rec.repo_id.replace("/", "__")
+    sidecar_path = rec.output_root / repo_safe / "attribution.json"
+    assert sidecar_path.exists(), f"attribution.json missing at {sidecar_path}"
+
+    data = json.loads(sidecar_path.read_text())
+    expected_hash = hashlib.sha256(
+        json.dumps(const, sort_keys=True).encode()
+    ).hexdigest()[:16]
+
+    assert data["node_pubkey"] == m.node_pubkey
+    assert data["policy_pubkey"] == policy_pk
+    assert data["governor_pubkey"] == governor_pk
+    assert data["constitution_hash"] == expected_hash
+    # All four fields present and non-null — the auditable-AI invariant.
+    for field in ("node_pubkey", "policy_pubkey", "governor_pubkey", "constitution_hash"):
+        assert field in data
+        assert data[field] is not None
 
 
 def test_handle_teleop_frame_records_active_policy(tmp_path, monkeypatch):

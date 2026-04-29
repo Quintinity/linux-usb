@@ -132,10 +132,12 @@ class ManipulatorCitizen(Citizen):
     def _refresh_attribution(self) -> None:
         """Push current provenance values into the episode recorder.
 
-        Called whenever any of the four attribution fields could have changed
-        (construct, constitution received, episode begin, teleop end). The
-        recorder's ``set_attribution`` is idempotent and just stores into a
-        dict, so calling it repeatedly is cheap.
+        Call sites: __init__, _on_constitution_received, and pre-begin_episode
+        in _execute_task. The watchdog and governor-disconnect paths clear
+        ``_active_policy_pubkey`` directly without invoking this — the next
+        episode-begin refresh will pick up the cleared value. The recorder's
+        ``set_attribution`` is idempotent and just stores into a dict, so
+        calling it repeatedly is cheap.
         """
         self._recorder.set_attribution(
             node_pubkey=self.node_pubkey,
@@ -294,6 +296,9 @@ class ManipulatorCitizen(Citizen):
         # Track which policy is driving us — every accepted frame's sender
         # is the current authority over this manipulator. Stamped onto the
         # episode attribution sidecar so recordings carry policy provenance.
+        # Envelope routing (citizen.py recipient filter) guarantees this frame
+        # is addressed to us, so no body-level target_follower_pubkey check is
+        # needed — env.sender is the active policy.
         self._active_policy_pubkey = env.sender
         self._frames_received += 1
         self._last_frame_time = time.time()
