@@ -1,58 +1,111 @@
-# linux-usb
+# citizenry
 
-Bootable Linux USB for running [HuggingFace LeRobot](https://github.com/huggingface/lerobot) v0.5.0 with an SO-101 robot arm on a Microsoft Surface Pro 7.
+Distributed robotics OS where every piece of hardware is an autonomous
+Ed25519-signed citizen sharing a constitution and a marketplace.
 
-## Quick Start
+The repo started life as a bootable Linux USB for a Surface Pro 7
+running LeRobot. It has since grown into a small mesh of independent
+citizens — a governor, a manipulator/perception node, and a policy node —
+that auction tasks to each other over Ed25519-signed multicast and
+record episodes with cryptographic provenance.
 
-### Phase 1 — Flash USB (on Windows)
+## The mesh
 
-1. Open PowerShell in this repo
-2. Run: `.\flash.ps1`
-3. Follow Rufus instructions to flash the USB
-
-### Phase 2 — Install Ubuntu (on Surface)
-
-Follow [docs/BOOT-GUIDE.md](docs/BOOT-GUIDE.md) for the toram install method.
-
-### Phase 3 — Configure (on Surface, after Ubuntu installed)
-
-```bash
-sudo apt update && sudo apt install -y git
-git clone https://github.com/Quintinity/linux-usb.git ~/linux-usb
-cd ~/linux-usb
-chmod +x setup.sh
-./setup.sh
-claude
-# Say: "continue setup"
+```
+            multicast 239.67.84.90:7770   (Ed25519-signed envelopes)
+        ┌─────────────────────────────────────────────────┐
+        │                                                 │
+   ┌────┴─────┐          ┌──────────────┐         ┌───────┴──────┐
+   │ Surface  │◄────────►│     Pi 5     │◄───────►│   Jetson     │
+   │ governor │          │ pi-inference │         │ jetson-policy│
+   │ 26c8bdf6 │          │   974b9268   │         │   a1778dd7   │
+   └──────────┘          └──────────────┘         └──────────────┘
+   constitution           SO-101 arms              SmolVLA on CUDA
+   + marketplace          Hailo-8L NPU             bids on manipulation
+   + ledgers              cameras + teleop         imitation policy
 ```
 
-## What You Need
+Each citizen carries its own Ed25519 keypair. The governor signs the
+Constitution and Laws; every other citizen verifies before applying.
+Every heartbeat, bid, attribution, and episode record on the wire is
+signed by the citizen that emitted it.
 
-- **USB stick:** 64GB+ USB 3.0 (SanDisk recommended)
-- **USB wireless keyboard** with 2.4GHz dongle (Surface Type Cover won't work until linux-surface kernel is installed)
-- **Multi-port USB adapter** (for keyboard dongle + USB stick simultaneously)
-- Surface Pro 7 with Secure Boot disabled
+## What it does today
 
-## How It Works
+- **Marketplace task auctions** — the governor proposes a task, citizens
+  bid, the marketplace picks the best bidder by skill + health +
+  co-location bonus.
+- **SmolVLA-driven manipulation** — the Jetson hosts a SmolVLA base
+  model, bids on `pick_and_place` tasks, and drives a follower arm via
+  teleop frames.
+- **Episode recording with cryptographic provenance** — every recorded
+  episode carries `policy_pubkey`, `governor_pubkey`, and
+  `constitution_hash` in its sidecar.
+- **v3 dataset format with HF auto-upload** — datasets push to Hugging
+  Face Hub, then soft-delete locally after a confirmed upload.
+- **Constitution + Laws governance** — the governor signs Articles and
+  Laws; all citizens verify before applying. 7 message types, 3 ledger
+  types (heartbeat, attribution, episode).
 
-1. **Flash** — `flash.ps1` downloads Ubuntu 24.04.2 LTS, verifies its SHA-256 checksum, and launches Rufus to flash a bootable USB
-2. **Install** — You install Ubuntu onto the USB using the [toram method](docs/BOOT-GUIDE.md) (loads the live image into RAM so the same USB can be reformatted as the install target)
-3. **Bootstrap** — `setup.sh` installs Claude Code, configures passwordless sudo, and copies setup instructions into Claude's context
-4. **AI-driven setup** — You launch `claude` and say "continue setup". Claude Code then drives a 5-phase install autonomously:
+## Quickstart
 
-| Phase | What it does |
-|-------|-------------|
-| 1. linux-surface kernel | Adds the linux-surface repo and installs the patched kernel for Type Cover, touchscreen, and trackpad support. Requires a reboot before continuing. |
-| 2. System packages | Installs build tools, Python 3.12, FFmpeg, video/audio libraries, and firmware updates in a single `apt install` pass. |
-| 3. LeRobot + SO-101 | Creates a Python 3.12 venv at `~/lerobot-env` and installs [LeRobot v0.5.0](https://github.com/huggingface/lerobot). |
-| 4. USB serial | Writes udev rules so the Feetech servo controller is accessible without root and adds the user to the `dialout` group. |
-| 5. Verification | Checks kernel version, Python version, LeRobot import, and loaded surface modules. Reports pass/fail. |
+Clone the repo and bootstrap the Surface as the governor host:
 
-The key idea: all the domain knowledge lives in `CLAUDE.md`, so Claude Code handles the entire post-install configuration — no manual steps beyond one reboot after Phase 1.
+```bash
+git clone https://github.com/Quintinity/linux-usb.git ~/linux-usb && cd ~/linux-usb
+bash setup.sh     # Surface bootstrap — installs Claude Code + passwordless sudo
+# Say "continue setup" to Claude Code when it launches.
+```
 
-## Notes
+`setup.sh` is the entry point on a fresh host. If you are starting from
+a brand-new Surface Pro 7 with no OS installed, see
+[docs/setup-surface-usb.md](docs/setup-surface-usb.md) for the bootable
+USB workflow that gets you to the point where `setup.sh` can run.
 
-- **GPU**: Intel Iris Plus — no CUDA. Training should be offloaded to cloud. Inference and data collection work fine on CPU.
-- **Cameras**: Built-in Surface cameras don't work on Linux. Use external USB cameras.
-- **Battery**: Expect shorter battery life than Windows.
-- **Feetech firmware**: Motor firmware updates require Windows.
+Once the citizenry is up on the Surface, run the demo:
+
+```bash
+source ~/lerobot-env/bin/activate
+python -m citizenry.governor_cli demo --task-type basic_gesture/wave
+```
+
+This brings up the governor, discovers any citizens currently announcing
+on the mesh, runs one marketplace round, and prints the winning bid
+along with the resulting attribution record.
+
+## Architecture
+
+The system is a small handful of long-running processes — one per
+citizen — that talk only over signed multicast. There is no central
+broker; the governor is just another citizen with elevated authority to
+sign Articles and Laws.
+
+The deepest design write-up is
+[docs/specs/2026-04-27-smolvla-citizen-design.md](docs/specs/2026-04-27-smolvla-citizen-design.md),
+which covers SmolVLA-as-citizen end-to-end: the policy citizen
+lifecycle, teleop frame routing, attribution sidecar, and how the
+Constitution gates what skills a citizen is allowed to bid on.
+
+For the narrative of what the citizenry is and where it came from, read
+[citizenry/SOUL.md](citizenry/SOUL.md). For the philosophy of how new
+citizens and capabilities are added without breaking older nodes, read
+[citizenry/GROWTH.md](citizenry/GROWTH.md).
+
+## Adding a device
+
+Onboarding a new citizen — generating its keypair, registering its
+pubkey with the governor, and provisioning its skills — will be driven
+by `bash scripts/add-device.sh` once that lands. **Coming soon.**
+
+Until then, see the per-device persona docs in `~/.claude/projects/` on
+each host and the matching `~/CLAUDE.md` for the device's role
+definition. The Surface is the governor; the Pi runs the manipulator
+and perception citizens; the Jetson hosts the SmolVLA policy citizen.
+
+## For Quintinity context
+
+The citizenry is the technical foundation Quintinity Ltd is building
+toward auditable AI for manufacturing — every action a robot takes is
+signed, attributable, and replayable from cryptographic provenance.
+Strategy and partner-pricing details live in an internal Quintinity
+strategy doc (Quintinity team only).
