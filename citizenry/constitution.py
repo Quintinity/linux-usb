@@ -249,6 +249,11 @@ def default_constitution() -> Constitution:
             description="Two camera role names the policy uses for observation. Order matters: [primary, secondary].",
             params={"value": ["wrist", "base"]},
         ),
+        Law(
+            id="camera.broadcast_interval_s",
+            description="Seconds between continuous JPEG frame broadcasts from CameraCitizens with a role assigned. Default 0.2 (5 Hz). Lower for faster policy reactions; raise to reduce LAN bandwidth.",
+            params={"value": 0.2},
+        ),
     ]
 
     return Constitution(
