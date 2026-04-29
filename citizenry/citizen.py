@@ -39,6 +39,7 @@ from .pain import PainMemory, PainEvent, compute_pain_intensity
 from .sleep_cycle import SleepEngine
 from .spatial import ZoneManager
 from .growth import GrowthTracker
+from .observation_cache import ObservationCache
 
 
 class Presence(Enum):
@@ -158,6 +159,11 @@ class Citizen:
         self.sleep_engine = SleepEngine()
         self.zone_manager = ZoneManager()
         self.growth_tracker = GrowthTracker()
+
+        # PolicyCitizen + any subclass that needs to feed real observations
+        # into a runner pulls from this cache. Updated transparently by the
+        # base ADVERTISE/REPORT handlers when bodies carry frame/state data.
+        self.observations = ObservationCache()
 
         # Message handlers — subclasses register additional handlers
         self._handlers: dict[int, list] = {
@@ -494,6 +500,9 @@ class Citizen:
             # Handshake: reply with our own ADVERTISE so they learn about us too
             self._send_advertise(recipient=sender, addr=n.addr)
             self._on_neighbor_joined(n)
+        # Cache any frame/state data the body carries (cameras may broadcast
+        # latest frame in ADVERTISE; manipulators may include joint_positions).
+        self._sniff_observation_body(env, body)
 
     def _handle_propose(self, env: Envelope, addr: tuple):
         """Override in subclass for task handling."""
@@ -525,6 +534,12 @@ class Citizen:
             if added > 0:
                 self._log(f"immune memory: merged {added} new patterns from [{short_id(env.sender)}]")
                 self._add_log("IMMUNE", short_id(env.sender), f"+{added} patterns")
+
+        # Cache any frame/state data the body carries:
+        #   - cameras send {type: "frame_capture", frame: <b64-jpeg>} REPORTs
+        #   - manipulators may emit joint_positions in pain or state-share REPORTs
+        # See _sniff_observation_body for the field shapes accepted.
+        self._sniff_observation_body(env, body)
 
     def _handle_govern(self, env: Envelope, addr: tuple):
         """Base governance handling — constitution and law updates."""
@@ -621,6 +636,86 @@ class Citizen:
                     return params.get("value", default)
             return default
         return default
+
+    def _sniff_observation_body(self, env: Envelope, body: dict) -> None:
+        """Inspect an ADVERTISE/REPORT body for cached observation data.
+
+        Frame caching: when ``body["frame"]`` is a base64-encoded JPEG string,
+        decode it and store under the camera role taken from
+        ``body["camera_role"]`` (or, as fallback, the sender neighbor's
+        registered name). Decoding failures are silently ignored — the cache
+        layer doesn't gate the rest of the dispatch.
+
+        State caching: when ``body["joint_positions"]`` is a list of ints/floats
+        (or a dict of motor_name -> int), store it keyed by the sender's pubkey
+        so PolicyCitizen can look it up by ``target_follower_pubkey``.
+
+        Telemetry-shaped REPORTs (type=="telemetry") nest per-motor data under
+        ``body["motors"]``; pull each motor's ``position`` if present.
+        """
+        if not isinstance(body, dict):
+            return
+
+        # --- Frame caching (camera REPORT/ADVERTISE bodies) ---
+        frame_b64 = body.get("frame")
+        if isinstance(frame_b64, str) and frame_b64:
+            role = body.get("camera_role")
+            if not role:
+                # Fallback: derive role from the sender's neighbor entry name.
+                # Cameras typically advertise themselves as "wrist-cam"/"base-cam";
+                # take whatever's there. Without a known sender, drop the frame
+                # rather than guess wrong.
+                n = self.neighbors.get(env.sender)
+                role = n.name if n is not None else None
+            if role:
+                arr = self._decode_jpeg_b64(frame_b64)
+                if arr is not None:
+                    ts = body.get("timestamp")
+                    self.observations.update_frame(
+                        camera_role=role, frame=arr,
+                        timestamp=ts if isinstance(ts, (int, float)) else None,
+                    )
+
+        # --- State caching (manipulator REPORT bodies) ---
+        jp = body.get("joint_positions")
+        state_arr = None
+        if isinstance(jp, list) and jp:
+            state_arr = jp
+        elif isinstance(jp, dict) and jp:
+            # Preserve a stable order if MOTOR_NAMES are keys; else dict order.
+            state_arr = list(jp.values())
+        elif body.get("type") == "telemetry":
+            motors = body.get("motors")
+            if isinstance(motors, dict) and motors:
+                positions = []
+                for _name, snap in motors.items():
+                    if isinstance(snap, dict) and "position" in snap:
+                        positions.append(snap["position"])
+                if positions:
+                    state_arr = positions
+        if state_arr is not None:
+            ts = body.get("timestamp")
+            self.observations.update_state(
+                follower_pubkey=env.sender, state=state_arr,
+                timestamp=ts if isinstance(ts, (int, float)) else None,
+            )
+
+    @staticmethod
+    def _decode_jpeg_b64(s: str):
+        """Decode a base64-encoded JPEG to a numpy array. Returns None on failure.
+
+        Kept on the Citizen class so the cache module stays free of cv2.
+        """
+        try:
+            import base64
+            import cv2
+            import numpy as np
+            buf = base64.b64decode(s)
+            arr = np.frombuffer(buf, dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            return img
+        except Exception:
+            return None
 
     def _on_neighbor_joined(self, neighbor: Neighbor):
         """Override in subclass to react to new neighbors."""

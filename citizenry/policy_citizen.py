@@ -128,13 +128,19 @@ class PolicyCitizen(Citizen):
     async def execute_task(self, task: Task, target_follower_pubkey: str) -> None:
         """Drive the follower for the duration of the task.
 
-        Reads cameras + state from neighbor REPORTs, calls runner.act(),
+        Reads cameras + state from the ObservationCache (populated by the base
+        Citizen handlers as ADVERTISE/REPORT bodies arrive), calls runner.act(),
         emits PROPOSE(teleop_frame, ttl=0.1) per action step.
+
+        When the observation is stale or missing (e.g. no cameras have pushed
+        frames yet), the loop sleeps and retries until either the data shows up
+        or the task is cancelled — black-input inference is never sent to the
+        runner.
         """
         self._active_task_id = task.id
         try:
             while self._active_task_id == task.id:
-                obs = await self._assemble_observation()  # TODO: returns stub zeros until camera-cache layer lands
+                obs = await self._assemble_observation(target_follower_pubkey)
                 if obs is None:
                     await asyncio.sleep(0.05)
                     continue
@@ -147,19 +153,26 @@ class PolicyCitizen(Citizen):
         finally:
             self._active_task_id = None
 
-    async def _assemble_observation(self) -> dict[str, Any] | None:
-        """Pull the latest frame from each named camera neighbor + state from
-        the target follower's last REPORT. Returns None if observation is stale.
+    async def _assemble_observation(self, target_follower_pubkey: str) -> dict[str, Any] | None:
+        """Pull the latest frame from each named camera + state from the target
+        follower's last REPORT. Returns None if any required input is stale or
+        missing — caller's loop will retry rather than feed black pixels into
+        the model.
 
-        Real production wiring: the camera neighbors push frames via ADVERTISE
-        and PolicyCitizen caches the latest. For now this returns a stub
-        observation — real wiring lands when the camera-frame caching layer
-        is built (out of Task 9 scope).
+        Inputs come from ``self.observations`` (an ObservationCache populated
+        transparently by the Citizen base handlers).
         """
+        primary_role, secondary_role = self.camera_role_pair()
+        primary = self.observations.latest_frame(primary_role, max_age_s=0.5)
+        secondary = self.observations.latest_frame(secondary_role, max_age_s=0.5)
+        state = self.observations.latest_state(target_follower_pubkey, max_age_s=0.5)
+        # All three required for a meaningful observation. None means stale/missing.
+        if primary is None or secondary is None or state is None:
+            return None
         return {
-            "observation.images.wrist": np.zeros((96, 128, 3), dtype=np.uint8),
-            "observation.images.base":  np.zeros((96, 128, 3), dtype=np.uint8),
-            "observation.state": np.zeros(6, dtype=np.float32),
+            f"observation.images.{primary_role}": primary,
+            f"observation.images.{secondary_role}": secondary,
+            "observation.state": state.astype(np.float32),
         }
 
     async def _emit_teleop(self, action_row: np.ndarray, target_follower_pubkey: str) -> None:

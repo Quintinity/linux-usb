@@ -101,6 +101,13 @@ async def test_execute_task_emits_teleop_when_neighbor_resolves(tmp_path, monkey
         capabilities=["6dof_arm"],
         addr=fake_addr,
     )
+    # Seed the observation cache so _assemble_observation produces a real
+    # observation (otherwise the loop would sleep waiting for camera frames).
+    import time as _time
+    now = _time.time()
+    p.observations.update_frame("wrist", np.zeros((96, 128, 3), dtype=np.uint8), timestamp=now)
+    p.observations.update_frame("base",  np.zeros((96, 128, 3), dtype=np.uint8), timestamp=now)
+    p.observations.update_state("follower_pk", [0, 0, 0, 0, 0, 0], timestamp=now)
     # Stub send_teleop so we can count calls without networking
     sent = []
     def fake_send_teleop(recipient, positions, addr):
@@ -120,6 +127,75 @@ async def test_execute_task_emits_teleop_when_neighbor_resolves(tmp_path, monkey
     assert rec == "follower_pk"
     assert addr == fake_addr
     assert len(positions) == 6
+
+
+@pytest.mark.asyncio
+async def test_execute_task_skips_when_observation_stale(tmp_path, monkeypatch):
+    """If the observation cache is empty (no camera ADVERTISEs / REPORTs yet),
+    execute_task's loop sleeps and retries — runner.act is never called, no
+    teleop frames are sent. Black-input inference must never happen."""
+    from citizenry import node_identity
+    monkeypatch.setattr(node_identity, "IDENTITY_DIR", tmp_path)
+    runner = MagicMock()
+    runner.act.return_value = np.zeros((5, 6), dtype=np.float32)
+    p = PolicyCitizen(runner=runner, node_pubkey="ab" * 32)
+    # Inject a follower neighbor so addr resolution would succeed if reached.
+    from citizenry.citizen import Neighbor
+    p.neighbors["follower_pk"] = Neighbor(
+        pubkey="follower_pk", name="fake", citizen_type="manipulator",
+        capabilities=["6dof_arm"], addr=("127.0.0.1", 9999),
+    )
+    # Deliberately do NOT seed observations.
+    sent = []
+    monkeypatch.setattr(p, "send_teleop", lambda *a, **k: sent.append(a))
+    from citizenry.marketplace import Task
+    task = Task(type="pick_and_place", params={"follower_pubkey": "follower_pk"})
+    coro_task = asyncio.create_task(p.execute_task(task, "follower_pk"))
+    await asyncio.sleep(0.15)  # several retry ticks at 50ms each
+    p._active_task_id = None
+    await asyncio.wait_for(coro_task, timeout=2.0)
+    # No observations → runner.act never called, no teleop frames sent.
+    assert runner.act.call_count == 0
+    assert len(sent) == 0
+
+
+@pytest.mark.asyncio
+async def test_assemble_observation_returns_none_when_state_missing(tmp_path, monkeypatch):
+    """Frames present but state missing → None (the loop will skip and retry)."""
+    from citizenry import node_identity
+    monkeypatch.setattr(node_identity, "IDENTITY_DIR", tmp_path)
+    runner = MagicMock()
+    p = PolicyCitizen(runner=runner, node_pubkey="ab" * 32)
+    import time as _time
+    now = _time.time()
+    p.observations.update_frame("wrist", np.zeros((96, 128, 3), dtype=np.uint8), timestamp=now)
+    p.observations.update_frame("base",  np.zeros((96, 128, 3), dtype=np.uint8), timestamp=now)
+    # No state for follower_pk
+    obs = await p._assemble_observation("follower_pk")
+    assert obs is None
+
+
+@pytest.mark.asyncio
+async def test_assemble_observation_assembles_when_all_present(tmp_path, monkeypatch):
+    """All three sources fresh → returns SmolVLA input dict with float32 state."""
+    from citizenry import node_identity
+    monkeypatch.setattr(node_identity, "IDENTITY_DIR", tmp_path)
+    runner = MagicMock()
+    p = PolicyCitizen(runner=runner, node_pubkey="ab" * 32)
+    import time as _time
+    now = _time.time()
+    p.observations.update_frame("wrist", np.ones((96, 128, 3), dtype=np.uint8) * 7, timestamp=now)
+    p.observations.update_frame("base",  np.ones((96, 128, 3), dtype=np.uint8) * 9, timestamp=now)
+    p.observations.update_state("follower_pk", [10, 20, 30, 40, 50, 60], timestamp=now)
+    obs = await p._assemble_observation("follower_pk")
+    assert obs is not None
+    assert "observation.images.wrist" in obs
+    assert "observation.images.base" in obs
+    assert obs["observation.state"].dtype == np.float32
+    assert list(obs["observation.state"]) == [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
+    # Confirm camera roles match camera_role_pair() default
+    assert obs["observation.images.wrist"][0, 0, 0] == 7
+    assert obs["observation.images.base"][0, 0, 0] == 9
 
 
 @pytest.mark.asyncio
