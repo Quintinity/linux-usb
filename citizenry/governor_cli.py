@@ -615,13 +615,22 @@ async def run_demo(surface, task_type: str = "basic_gesture/wave") -> None:
         caps = getattr(n, "capabilities", [])
         print(f"  {n.name} [{pk[:8]}] type={getattr(n, 'citizen_type', '?')} caps={caps}")
     print(f"\nProposing task: {task_type!r}")
-    result = await create_task_and_wait(
-        surface=surface,
-        task_type=task_type,
-        params={},
-        bid_window_s=2.5,
-        completion_timeout_s=30.0,
-    )
+    try:
+        result = await create_task_and_wait(
+            surface=surface,
+            task_type=task_type,
+            params={},
+            bid_window_s=2.5,
+            completion_timeout_s=30.0,
+        )
+    except asyncio.TimeoutError:
+        print(f"\n{RED}✗{RESET} task did not complete within 30s — no bidder accepted.")
+        print(
+            "  This is the expected outcome when no citizen on the mesh has the "
+            "capabilities required for this task (e.g. no arm attached for a "
+            "manipulation task)."
+        )
+        return
     print("\n--- result ---")
     for k, v in result.items():
         print(f"  {k}: {v}")
