@@ -81,3 +81,28 @@ def test_v2_from_dict_accepts_full_payload():
     assert c.policy_pinning == {"smolvla-pickplace-v3": "hf:rev:def"}
     assert c.embassy_topics == {"opcua_namespace": "ns/quintinity/cell1"}
     assert c.compliance_artefacts == {"aibom_url": "https://example/aibom.cdx.json"}
+
+
+def test_v2_sign_verify_round_trip():
+    """Lock in the security-critical behavior of the v2 schema:
+
+    - sign() with a fresh signing key produces a verifiable signature
+    - authority_pubkey and governor_pubkey are mirrored for v1-compat verifiers
+    - Signature survives both dict and bytes round-trips
+    - Tampering on a v2-only field (policy_pinning) invalidates the signature
+    """
+    c = Constitution()  # v2 default
+    sk = SigningKey.generate()
+    c.sign(sk)
+    assert c.verify()
+    # v1-compat mirror: both pubkey fields must equal the signing key for v2.
+    assert c.authority_pubkey == c.governor_pubkey
+    assert c.authority_pubkey != ""
+    # Survives dict round-trip
+    assert Constitution.from_dict(c.to_dict()).verify()
+    # Survives bytes round-trip
+    assert Constitution.from_bytes(c.to_bytes()).verify()
+    # Tampering on a v2-only field invalidates the signature
+    c2 = Constitution.from_dict(c.to_dict())
+    c2.policy_pinning = {"evil": "sha256:bad"}
+    assert not c2.verify()
