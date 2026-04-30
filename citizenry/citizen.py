@@ -117,6 +117,10 @@ class Citizen:
         self._running = False
         self._tasks: list[asyncio.Task] = []
 
+        # Constitution v2: provenance pins (per-policy_id, per-tool)
+        self.policy_pinning: dict[str, dict] = {}
+        self.tool_manifest_pinning: dict[str, str] = {}
+
         # Constitution
         self.constitution: dict | None = None
         self.constitution_received: bool = False
@@ -668,6 +672,28 @@ class Citizen:
         elif gov_type == "policy_rollback":
             self._log(f"POLICY ROLLBACK from [{short_id(env.sender)}]")
             self._add_log("GOVERN", short_id(env.sender), "policy rolled back")
+
+        elif gov_type == "pin_policy":
+            policy_id = body.get("policy_id", "")
+            hf_rev = body.get("hf_revision_sha", "")
+            aibom = body.get("aibom_url", "")
+            rekor = body.get("rekor_log_index", -1)
+            if policy_id and hf_rev:
+                self.policy_pinning[policy_id] = {
+                    "hf_revision_sha": hf_rev,
+                    "aibom_url": aibom,
+                    "rekor_log_index": rekor,
+                }
+                self._log(
+                    f"POLICY PIN from [{short_id(env.sender)}]: "
+                    f"{policy_id} → {hf_rev[:12]}"
+                )
+                self._add_log("GOVERN", short_id(env.sender), f"pin: {policy_id}")
+            else:
+                self._log(
+                    f"pin_policy MALFORMED from [{short_id(env.sender)}]: "
+                    f"missing policy_id or hf_revision_sha"
+                )
 
         elif gov_type == "genome":
             genome_data = body.get("genome", {})
