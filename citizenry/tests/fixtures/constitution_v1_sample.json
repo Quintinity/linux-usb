@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "governor_pubkey": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "articles": [
+    {"number": 1, "title": "Do No Harm", "text": "No command may cause physical harm."}
+  ],
+  "laws": [
+    {"id": "heartbeat_interval", "description": "seconds", "params": {"seconds": 2.0}}
+  ],
+  "servo_limits": {
+    "max_torque": 500,
+    "protection_current": 250,
+    "max_temperature": 65,
+    "overload_torque": 90,
+    "protective_torque": 50,
+    "min_voltage": 6.0
+  },
+  "signature": "deadbeef"
+}

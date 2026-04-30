@@ -54,44 +54,58 @@ class ServoLimits:
 class Constitution:
     """The root governance document for an armOS citizenry."""
 
-    version: int = 1
-    governor_pubkey: str = ""        # hex-encoded Ed25519 public key
+    # v1 fields (preserved for backward compatibility)
+    version: int = 2
+    governor_pubkey: str = ""        # legacy alias of authority_pubkey
     articles: list[Article] = field(default_factory=list)
     laws: list[Law] = field(default_factory=list)
     servo_limits: ServoLimits = field(default_factory=ServoLimits)
     signature: str = ""              # hex-encoded Ed25519 signature
 
+    # v2 additions
+    authority_pubkey: str = ""       # hex-encoded Ed25519 public key of the Authority
+    node_key_version: int = 1
+    tool_manifest_pinning: dict[str, str] = field(default_factory=dict)
+    policy_pinning: dict[str, str] = field(default_factory=dict)
+    embassy_topics: dict[str, str] = field(default_factory=dict)
+    compliance_artefacts: dict[str, str] = field(default_factory=dict)
+
     # -- crypto -------------------------------------------------------------
 
     def _signable_payload(self) -> bytes:
-        """Return the canonical bytes that get signed/verified.
-
-        The signature field itself is excluded so that signing and
-        verification are consistent.
-        """
+        """Return the canonical bytes that get signed/verified."""
         d = self.to_dict()
         d.pop("signature", None)
         return json.dumps(d, sort_keys=True, separators=(",", ":")).encode()
 
     def sign(self, signing_key: SigningKey) -> None:
-        """Sign this constitution with the governor's private key."""
-        self.governor_pubkey = signing_key.verify_key.encode(
-            encoder=HexEncoder
-        ).decode()
+        """Sign with the Authority's private key.
+
+        For v2, the signing pubkey populates ``authority_pubkey`` and is
+        mirrored into ``governor_pubkey`` for backward compatibility with
+        v1 verifiers. For v1 Constitutions (version == 1) only
+        ``governor_pubkey`` is populated.
+        """
+        pub_hex = signing_key.verify_key.encode(encoder=HexEncoder).decode()
+        if self.version >= 2:
+            self.authority_pubkey = pub_hex
+            self.governor_pubkey = pub_hex  # mirror for v1 verifiers
+        else:
+            self.governor_pubkey = pub_hex
         signed = signing_key.sign(self._signable_payload(), encoder=HexEncoder)
         self.signature = signed.signature.decode()
 
     def verify(self, verify_key: VerifyKey | None = None) -> bool:
-        """Verify the signature. Uses embedded governor_pubkey if none given.
+        """Verify the signature.
 
-        Returns True on success, False on failure.
+        For v2 Constitutions, prefers ``authority_pubkey``; falls back to
+        ``governor_pubkey`` for v1 compatibility.
         """
         if verify_key is None:
-            if not self.governor_pubkey:
+            pub_hex = self.authority_pubkey or self.governor_pubkey
+            if not pub_hex:
                 return False
-            verify_key = VerifyKey(
-                self.governor_pubkey.encode(), encoder=HexEncoder
-            )
+            verify_key = VerifyKey(pub_hex.encode(), encoder=HexEncoder)
         try:
             verify_key.verify(
                 self._signable_payload(),
@@ -108,21 +122,33 @@ class Constitution:
         return {
             "version": self.version,
             "governor_pubkey": self.governor_pubkey,
+            "authority_pubkey": self.authority_pubkey,
+            "node_key_version": self.node_key_version,
             "articles": [asdict(a) for a in self.articles],
             "laws": [asdict(l) for l in self.laws],
             "servo_limits": asdict(self.servo_limits),
+            "tool_manifest_pinning": dict(self.tool_manifest_pinning),
+            "policy_pinning": dict(self.policy_pinning),
+            "embassy_topics": dict(self.embassy_topics),
+            "compliance_artefacts": dict(self.compliance_artefacts),
             "signature": self.signature,
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Constitution:
-        """Deserialize from a dictionary."""
+        """Deserialize from a dictionary. Accepts both v1 and v2 payloads."""
         return cls(
-            version=d["version"],
+            version=d.get("version", 1),
             governor_pubkey=d.get("governor_pubkey", ""),
+            authority_pubkey=d.get("authority_pubkey", ""),
+            node_key_version=d.get("node_key_version", 1),
             articles=[Article(**a) for a in d.get("articles", [])],
             laws=[Law(**l) for l in d.get("laws", [])],
             servo_limits=ServoLimits(**d.get("servo_limits", {})),
+            tool_manifest_pinning=dict(d.get("tool_manifest_pinning", {})),
+            policy_pinning=dict(d.get("policy_pinning", {})),
+            embassy_topics=dict(d.get("embassy_topics", {})),
+            compliance_artefacts=dict(d.get("compliance_artefacts", {})),
             signature=d.get("signature", ""),
         )
 
@@ -257,7 +283,7 @@ def default_constitution() -> Constitution:
     ]
 
     return Constitution(
-        version=1,
+        version=2,
         articles=articles,
         laws=laws,
         servo_limits=ServoLimits(),
