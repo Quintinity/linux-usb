@@ -695,6 +695,26 @@ class Citizen:
                     f"missing policy_id or hf_revision_sha"
                 )
 
+        elif gov_type == "pin_tool_manifest":
+            server = body.get("server", "")
+            sha = body.get("sha256", "")
+            if server and len(sha) == 64:
+                try:
+                    int(sha, 16)
+                    self.tool_manifest_pinning[server] = sha
+                    self._log(
+                        f"TOOL MANIFEST PIN from [{short_id(env.sender)}]: "
+                        f"{server} → {sha[:12]}"
+                    )
+                    self._add_log("GOVERN", short_id(env.sender), f"tm-pin: {server}")
+                except ValueError:
+                    self._log(f"pin_tool_manifest non-hex sha for {server}")
+            else:
+                self._log(
+                    f"pin_tool_manifest MALFORMED from [{short_id(env.sender)}]: "
+                    f"server={server!r} sha_len={len(sha)}"
+                )
+
         elif gov_type == "genome":
             genome_data = body.get("genome", {})
             try:
