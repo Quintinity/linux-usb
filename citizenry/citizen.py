@@ -120,6 +120,8 @@ class Citizen:
         # Constitution v2: provenance pins (per-policy_id, per-tool)
         self.policy_pinning: dict[str, dict] = {}
         self.tool_manifest_pinning: dict[str, str] = {}
+        self.node_key_version: int = 1
+        self._stale_node_pubkeys: set[str] = set()
 
         # Constitution
         self.constitution: dict | None = None
@@ -713,6 +715,24 @@ class Citizen:
                 self._log(
                     f"pin_tool_manifest MALFORMED from [{short_id(env.sender)}]: "
                     f"server={server!r} sha_len={len(sha)}"
+                )
+
+        elif gov_type == "rotate_node_key":
+            old_pk = body.get("old_node_pubkey", "")
+            new_pk = body.get("new_node_pubkey", "")
+            new_version = int(body.get("version", 0))
+            if new_version > self.node_key_version and len(old_pk) == 64 and len(new_pk) == 64:
+                self.node_key_version = new_version
+                self._stale_node_pubkeys.add(old_pk)
+                self._log(
+                    f"NODE KEY ROTATE from [{short_id(env.sender)}]: "
+                    f"{short_id(old_pk)} → {short_id(new_pk)} (v{new_version})"
+                )
+                self._add_log("GOVERN", short_id(env.sender), f"rotate: v{new_version}")
+            else:
+                self._log(
+                    f"rotate_node_key IGNORED from [{short_id(env.sender)}]: "
+                    f"version={new_version} current={self.node_key_version}"
                 )
 
         elif gov_type == "genome":
