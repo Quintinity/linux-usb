@@ -121,7 +121,7 @@ class Citizen:
         self.policy_pinning: dict[str, dict] = {}
         self.tool_manifest_pinning: dict[str, str] = {}
         self.node_key_version: int = 1
-        self._stale_node_pubkeys: set[str] = set()
+        self.stale_node_pubkeys: set[str] = set()
 
         # Constitution
         self.constitution: dict | None = None
@@ -720,10 +720,21 @@ class Citizen:
         elif gov_type == "rotate_node_key":
             old_pk = body.get("old_node_pubkey", "")
             new_pk = body.get("new_node_pubkey", "")
-            new_version = int(body.get("version", 0))
-            if new_version > self.node_key_version and len(old_pk) == 64 and len(new_pk) == 64:
+            try:
+                new_version = int(body.get("version", 0))
+            except (TypeError, ValueError):
+                new_version = -1
+            try:
+                if old_pk:
+                    bytes.fromhex(old_pk)
+                if new_pk:
+                    bytes.fromhex(new_pk)
+                pubkeys_valid = len(old_pk) == 64 and len(new_pk) == 64
+            except ValueError:
+                pubkeys_valid = False
+            if new_version > self.node_key_version and pubkeys_valid:
                 self.node_key_version = new_version
-                self._stale_node_pubkeys.add(old_pk)
+                self.stale_node_pubkeys.add(old_pk)
                 self._log(
                     f"NODE KEY ROTATE from [{short_id(env.sender)}]: "
                     f"{short_id(old_pk)} → {short_id(new_pk)} (v{new_version})"
@@ -732,7 +743,8 @@ class Citizen:
             else:
                 self._log(
                     f"rotate_node_key IGNORED from [{short_id(env.sender)}]: "
-                    f"version={new_version} current={self.node_key_version}"
+                    f"version={new_version} current={self.node_key_version} "
+                    f"old_len={len(old_pk)} new_len={len(new_pk)}"
                 )
 
         elif gov_type == "genome":

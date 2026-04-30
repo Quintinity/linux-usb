@@ -40,7 +40,7 @@ def test_rotate_node_key_records_pubkey_for_marketplace(monkeypatch, tmp_path):
         "new_node_pubkey": "b" * 64,
         "version": 2,
     }), addr=("127.0.0.1", 0))
-    assert c._stale_node_pubkeys == {"a" * 64}
+    assert c.stale_node_pubkeys == {"a" * 64}
 
 
 def test_rotate_node_key_rejects_old_version(monkeypatch, tmp_path):
@@ -55,4 +55,47 @@ def test_rotate_node_key_rejects_old_version(monkeypatch, tmp_path):
         "version": 3,
     }), addr=("127.0.0.1", 0))
     assert c.node_key_version == 5
-    assert c._stale_node_pubkeys == set()
+    assert c.stale_node_pubkeys == set()
+
+
+def test_rotate_node_key_ignores_equal_version(monkeypatch, tmp_path):
+    """Receiving a rotate at the current version is a noop (idempotency)."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    c = Citizen(name="test-rotate-equal", citizen_type="test", capabilities=[])
+    c.node_key_version = 5
+    c._handle_govern(_env({
+        "type": "rotate_node_key",
+        "old_node_pubkey": "a" * 64,
+        "new_node_pubkey": "b" * 64,
+        "version": 5,
+    }), addr=("127.0.0.1", 0))
+    assert c.node_key_version == 5
+    assert c.stale_node_pubkeys == set()
+
+
+def test_rotate_node_key_rejects_non_hex_pubkey(monkeypatch, tmp_path):
+    """Pubkeys must be valid hex even when length is 64."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    c = Citizen(name="test-rotate-nonhex", citizen_type="test", capabilities=[])
+    c._handle_govern(_env({
+        "type": "rotate_node_key",
+        "old_node_pubkey": "z" * 64,
+        "new_node_pubkey": "b" * 64,
+        "version": 2,
+    }), addr=("127.0.0.1", 0))
+    assert c.node_key_version == 1
+    assert c.stale_node_pubkeys == set()
+
+
+def test_rotate_node_key_handles_malformed_version(monkeypatch, tmp_path):
+    """Non-int version is treated as malformed (does not raise)."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    c = Citizen(name="test-rotate-bad-version", citizen_type="test", capabilities=[])
+    c._handle_govern(_env({
+        "type": "rotate_node_key",
+        "old_node_pubkey": "a" * 64,
+        "new_node_pubkey": "b" * 64,
+        "version": "two",
+    }), addr=("127.0.0.1", 0))
+    assert c.node_key_version == 1
+    assert c.stale_node_pubkeys == set()
