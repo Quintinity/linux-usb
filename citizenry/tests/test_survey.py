@@ -2,7 +2,8 @@
 
 from citizenry.survey import (
     Accelerator, Camera, Compute, HardwareDelta, HardwareMap, ServoBus,
-    _parse_hailortcli_arch, _parse_libcamera_list, _parse_cpuinfo, _parse_meminfo,
+    _parse_hailortcli_arch, _parse_libcamera_list, _parse_tegra_v4l2_name,
+    _parse_cpuinfo, _parse_meminfo,
     merge_capabilities, project_capabilities,
     CAMERA, CSI_CAMERA, USB_CAMERA, COMPUTE,
     HAILO_INFERENCE, NVIDIA_INFERENCE, CORAL_INFERENCE,
@@ -29,6 +30,21 @@ Available cameras
 def test_parse_libcamera_no_cameras():
     assert _parse_libcamera_list("No cameras available!") == []
     assert _parse_libcamera_list("") == []
+
+
+def test_parse_tegra_v4l2_name_imx219():
+    """Real Jetson Orin Nano name string for the IMX219 CSI camera."""
+    assert _parse_tegra_v4l2_name("vi-output, imx219 9-0010") == "imx219"
+
+
+def test_parse_tegra_v4l2_name_imx477():
+    assert _parse_tegra_v4l2_name("vi-output, imx477 10-001a") == "imx477"
+
+
+def test_parse_tegra_v4l2_name_no_sensor():
+    assert _parse_tegra_v4l2_name("vi-output") is None
+    assert _parse_tegra_v4l2_name("") is None
+    assert _parse_tegra_v4l2_name("vi-output, ") is None
 
 
 def test_parse_cpuinfo_x86():

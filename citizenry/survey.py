@@ -3,8 +3,9 @@
 Probes the local machine and produces a structured `HardwareMap` plus a
 flat `capabilities` list compatible with the existing mDNS/Citizen layer.
 
-Slice 1 scope: cameras (libcamera CSI + V4L2 USB) and compute. Future
-slices add accelerators, servo buses, audio, and heartbeat enrichment.
+Slice 1 scope: cameras (libcamera CSI on Pi + Tegra CSI on Jetson + V4L2 USB)
+and compute. Future slices add accelerators, servo buses, audio, and heartbeat
+enrichment.
 """
 
 import asyncio
@@ -34,7 +35,7 @@ class Camera:
     kind: Literal["csi", "usb"]
     model: str | None
     path: str
-    driver: Literal["libcamera", "v4l2"]
+    driver: Literal["libcamera", "v4l2", "tegra"]
 
 
 @dataclass
@@ -183,6 +184,52 @@ def _probe_cameras_libcamera() -> list[Camera]:
     except (subprocess.TimeoutExpired, OSError):
         return []
     return _parse_libcamera_list(result.stdout)
+
+
+def _parse_tegra_v4l2_name(raw: str) -> str | None:
+    """Pull the sensor model from a Tegra capture-VI v4l2 ``name`` string.
+
+    Names look like ``vi-output, imx219 9-0010`` — the sensor token sits after
+    the comma; the trailing token is the I2C bus-address pair, which we drop.
+    Returns None if the string doesn't match this shape.
+    """
+    if "," not in raw:
+        return None
+    sensor = raw.split(",", 1)[1].strip()
+    if not sensor:
+        return None
+    return sensor.split()[0]
+
+
+def _probe_cameras_tegra() -> list[Camera]:
+    """CSI cameras on Jetson via the Tegra capture-VI driver.
+
+    Jetson exposes CSI sensors as /dev/videoN with driver tegra-camrtc-capture-vi
+    — distinct from uvcvideo (USB) and from libcamera's csi:N paths on Pi.
+    Userspace capture goes through libargus / nvarguscamerasrc, hence driver="tegra".
+    """
+    cameras = []
+    sysfs = Path("/sys/class/video4linux")
+    if not sysfs.exists():
+        return cameras
+    for entry in sorted(sysfs.iterdir()):
+        if not entry.name.startswith("video"):
+            continue
+        try:
+            uevent = (entry / "device" / "uevent").read_text()
+        except OSError:
+            continue
+        if "DRIVER=tegra" not in uevent:
+            continue
+        try:
+            raw = (entry / "name").read_text().strip()
+        except OSError:
+            continue
+        model = _parse_tegra_v4l2_name(raw)
+        if not model:
+            continue
+        cameras.append(Camera(kind="csi", model=model, path=f"/dev/{entry.name}", driver="tegra"))
+    return cameras
 
 
 def _probe_cameras_v4l2() -> list[Camera]:
@@ -390,8 +437,9 @@ def _probe_compute() -> Compute:
 
 async def survey_hardware() -> HardwareMap:
     """Run all probes in parallel via to_thread (most are blocking syscalls)."""
-    csi, v4l2, hailo, nvidia, coral, servos, compute = await asyncio.gather(
+    csi_lib, csi_tegra, v4l2, hailo, nvidia, coral, servos, compute = await asyncio.gather(
         asyncio.to_thread(_probe_cameras_libcamera),
+        asyncio.to_thread(_probe_cameras_tegra),
         asyncio.to_thread(_probe_cameras_v4l2),
         asyncio.to_thread(_probe_accelerators_hailo),
         asyncio.to_thread(_probe_accelerators_nvidia),
@@ -400,7 +448,7 @@ async def survey_hardware() -> HardwareMap:
         asyncio.to_thread(_probe_compute),
     )
     return HardwareMap(
-        cameras=csi + v4l2,
+        cameras=csi_lib + csi_tegra + v4l2,
         accelerators=hailo + nvidia + coral,
         servo_buses=servos,
         compute=compute,
