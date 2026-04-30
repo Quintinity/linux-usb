@@ -10,19 +10,25 @@ local citizenry mesh. Three tools, no more:
                            Task body matching ``Task.from_propose_body``.
   * ``govern_update``    — load the EMEX Constitution as a raw dict, apply
                            a structured mutator, bump version, re-sign with
-                           the canonical-JSON pattern from T21, and
-                           multicast a GOVERN envelope.
+                           the **Authority key** via the canonical-JSON
+                           pattern from T21, and multicast a GOVERN envelope.
+                           (The envelope itself is signed by the node key —
+                           two-layer model: payload = Authority, envelope =
+                           node.)
 
 Architectural choices (matching T21):
 
-  * Standalone — owns its own UDP socket, signs with ``~/.citizenry/node.key``
-    directly. No dependency on a long-running ``citizenry-surface.service``.
+  * Standalone — owns its own UDP socket, signs envelopes with
+    ``~/.citizenry/node.key`` directly. Constitution **payloads** are signed
+    by ``~/.citizenry/authority.key`` via
+    ``_resign_constitution_with_authority``. No dependency on a long-running
+    ``citizenry-surface.service``.
   * stdio transport for the MCP client. T27 (the Cell 3 orchestrator) will
     launch this as a subprocess.
-  * Constitution signing copies the ``_sign_dict`` pattern from
-    ``citizenry/cli/governor_emex_tablet.py`` verbatim. The
-    ``Constitution.from_dict()`` round-trip would strip EMEX extension
-    fields (``max_torque_pct``, ``max_voltage``, ``position_envelope``).
+  * Constitution signing uses the canonical-JSON pattern (sorted keys, tight
+    separators, signature excluded) directly on the dict — bypassing
+    ``Constitution.from_dict()`` so EMEX extension fields
+    (``max_torque_pct``, ``max_voltage``, ``position_envelope``) survive.
 
 Mutator shapes accepted by ``govern_update``:
 
@@ -52,6 +58,7 @@ from typing import Any
 
 import nacl.signing
 
+from citizenry.authority import load_or_create_authority_key
 from citizenry.identity import load_or_create_identity, pubkey_hex
 from citizenry.protocol import (
     MULTICAST_GROUP,
@@ -60,6 +67,41 @@ from citizenry.protocol import (
     MessageType,
     make_envelope,
 )
+
+
+# ---------------------------------------------------------------------------
+# Constitution-amendment signing helper
+# ---------------------------------------------------------------------------
+
+
+def _resign_constitution_with_authority(constitution_dict: dict) -> dict:
+    """Strip any existing signature and re-sign the Constitution with the
+    Authority key. Returns the (mutated) dict.
+
+    This is the canonical path for the MCP govern_update tool: any time the
+    MCP server mutates a Constitution and re-broadcasts it, the payload must
+    be signed by the Authority key (not the node key). The multicast envelope
+    that carries the payload remains signed by the node key — two layers,
+    two distinct keys.
+
+    Uses the canonical-JSON pattern (sorted keys, tight separators, signature
+    excluded) directly on the dict so EMEX extension fields
+    (``max_torque_pct``, ``max_voltage``, ``position_envelope``,
+    ``deployment``, ``deployment_notes``) survive — round-tripping through
+    ``Constitution.from_dict`` would strip them.
+    """
+    auth_key = load_or_create_authority_key()
+    auth_pub_hex = auth_key.verify_key.encode().hex()
+    constitution_dict["authority_pubkey"] = auth_pub_hex
+    # Mirror into governor_pubkey so v1 verifiers (and any cached wire-format
+    # consumers that pre-date v2 fields) still accept the signature.
+    constitution_dict["governor_pubkey"] = auth_pub_hex
+    payload = dict(constitution_dict)
+    payload.pop("signature", None)
+    signable = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    signed = auth_key.sign(signable)
+    constitution_dict["signature"] = signed.signature.hex()
+    return constitution_dict
 
 
 log = logging.getLogger("citizen.mcp")
@@ -104,24 +146,6 @@ class MeshAdapter:
             socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack("b", 1)
         )
         self._sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
-
-    # -- shared crypto ----------------------------------------------------
-
-    def _sign_dict(self, c: dict[str, Any]) -> dict[str, Any]:
-        """Sign a Constitution dict in place using the canonical-JSON pattern.
-
-        Mirrors ``Constitution._signable_payload``: sorted keys, tight
-        separators, signature field excluded. Keeps the EMEX extension
-        fields intact (``max_torque_pct``, ``max_voltage``,
-        ``position_envelope``) — see T21's ``governor_emex_tablet.py``.
-        """
-        c["governor_pubkey"] = self.signing_key.verify_key.encode().hex()
-        payload = dict(c)
-        payload.pop("signature", None)
-        signable = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-        signed = self.signing_key.sign(signable)
-        c["signature"] = signed.signature.hex()
-        return c
 
     # -- send -------------------------------------------------------------
 
@@ -188,7 +212,9 @@ class MeshAdapter:
         new = copy.deepcopy(c)
         new = _apply_mutator(new, mutator)
         new["version"] = int(c.get("version", 0)) + 1
-        signed = self._sign_dict(new)
+        # Constitution payload is signed by the Authority key (smell #1 fix);
+        # the GOVERN envelope below remains signed by the node key.
+        signed = _resign_constitution_with_authority(new)
 
         env = make_envelope(
             MessageType.GOVERN,

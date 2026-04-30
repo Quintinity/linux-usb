@@ -122,7 +122,12 @@ class GovernorTabletServer:
     # -- crypto -----------------------------------------------------------
 
     def _sign_dict(self, c: dict[str, Any]) -> dict[str, Any]:
-        """Sign a Constitution dict in place using the node key.
+        """Sign a Constitution dict in place using the **Authority** key.
+
+        smell #1 fix: Constitution amendments broadcast by the EMEX tablet
+        must use the Authority identity. The multicast envelope that carries
+        the amendment continues to be signed by self.signing_key in
+        ``_broadcast`` — two layers, two distinct keys.
 
         We can't use Constitution.sign() directly because the EMEX schema
         carries extra ServoLimits fields (max_torque_pct, max_voltage,
@@ -132,11 +137,17 @@ class GovernorTabletServer:
         Instead we mirror Constitution._signable_payload(): canonical JSON
         with sorted keys and tight separators, signature field excluded.
         """
-        c["governor_pubkey"] = self.signing_key.verify_key.encode().hex()
+        from citizenry.authority import load_or_create_authority_key
+        auth_key = load_or_create_authority_key()
+        auth_pub_hex = auth_key.verify_key.encode().hex()
+        c["authority_pubkey"] = auth_pub_hex
+        # Mirror into governor_pubkey so v1 verifiers (and the EMEX wire
+        # consumers that read this field directly) still accept the sig.
+        c["governor_pubkey"] = auth_pub_hex
         payload = dict(c)
         payload.pop("signature", None)
         signable = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-        signed = self.signing_key.sign(signable)
+        signed = auth_key.sign(signable)
         c["signature"] = signed.signature.hex()
         return c
 
