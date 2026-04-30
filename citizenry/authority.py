@@ -18,6 +18,10 @@ from pathlib import Path
 import nacl.signing
 import nacl.encoding
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 
 AUTHORITY_DIR = Path.home() / ".citizenry"
 _KEY_PATH = AUTHORITY_DIR / "authority.key"
@@ -48,6 +52,14 @@ def load_or_create_authority_key() -> nacl.signing.SigningKey:
     key = nacl.signing.SigningKey.generate()
     _KEY_PATH.write_bytes(key.encode())
     _KEY_PATH.chmod(0o600)
+    pub_hex = key.verify_key.encode(encoder=nacl.encoding.RawEncoder).hex()
+    _log.warning(
+        "Minted fresh Authority key at %s (pubkey=%s…). "
+        "If this host previously had an authority.key, restore from backup "
+        "before broadcasting any GOVERN amendments — citizens with cached "
+        "constitutions will reject this new root identity.",
+        _KEY_PATH, pub_hex[:12],
+    )
     return key
 
 

@@ -49,3 +49,28 @@ def test_corrupt_authority_key_raises(isolated_home):
     p.write_bytes(b"not32bytes")
     with pytest.raises(authority.AuthorityKeyCorruptError):
         authority.load_or_create_authority_key()
+
+
+def test_load_or_create_warns_on_fresh_mint(isolated_home, caplog):
+    """A freshly-minted Authority key emits a WARNING log line."""
+    import logging
+    caplog.set_level(logging.WARNING, logger="citizenry.authority")
+    authority.load_or_create_authority_key()
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("Minted fresh Authority key" in r.message for r in warnings), (
+        f"expected fresh-mint warning, got: {[r.message for r in warnings]}"
+    )
+
+
+def test_load_or_create_silent_on_existing_key(isolated_home, caplog):
+    """Loading an existing key does NOT emit the fresh-mint warning."""
+    import logging
+    # First call mints the key.
+    authority.load_or_create_authority_key()
+    caplog.clear()
+    caplog.set_level(logging.WARNING, logger="citizenry.authority")
+    # Second call should be silent on the warn path.
+    authority.load_or_create_authority_key()
+    assert not any(
+        "Minted fresh" in r.message for r in caplog.records
+    ), "fresh-mint warning fired on existing key"
