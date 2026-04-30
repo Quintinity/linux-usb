@@ -85,6 +85,30 @@ class ConstitutionView:
     def signature(self) -> str:
         return self.base.signature
 
+    @property
+    def authority_pubkey(self) -> str:
+        return self.base.authority_pubkey
+
+    @property
+    def node_key_version(self) -> int:
+        return self.base.node_key_version
+
+    @property
+    def tool_manifest_pinning(self) -> dict[str, str]:
+        return dict(self.base.tool_manifest_pinning)
+
+    @property
+    def policy_pinning(self) -> dict[str, str]:
+        return dict(self.base.policy_pinning)
+
+    @property
+    def embassy_topics(self) -> dict[str, str]:
+        return dict(self.base.embassy_topics)
+
+    @property
+    def compliance_artefacts(self) -> dict[str, str]:
+        return dict(self.base.compliance_artefacts)
+
     def verify(self) -> bool:
         return self.base.verify()
 
