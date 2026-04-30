@@ -127,6 +127,11 @@ class Citizen:
         # Stats
         self.messages_sent = 0
         self.messages_received = 0
+
+        # Throttle unicast DISCOVER replies to unknown heartbeat senders
+        # (prevents a flood when a citizen heartbeats at 1 Hz before
+        # the governor has registered it). pubkey -> last-prompt unix.
+        self._unknown_hb_prompt: dict[str, float] = {}
         self.start_time: float = 0
 
         # Slice 3: hardware self-survey result; subclasses set this after super().__init__.
@@ -234,6 +239,54 @@ class Citizen:
         self._unicast.close()
         self._log("citizen stopped")
 
+    def dump_state(self) -> dict:
+        """Return a JSON-safe snapshot of live citizen + neighbor state.
+
+        Used by SIGUSR1 handlers to write `/tmp/<name>.state.json` for
+        out-of-band inspection without joining the multicast group.
+        """
+        now = time.time()
+        return {
+            "dumped_at_unix": now,
+            "self": {
+                "name": self.name,
+                "citizen_type": self.citizen_type,
+                "pubkey": self.pubkey,
+                "short_id": self.short_id,
+                "node_pubkey": self.node_pubkey,
+                "capabilities": list(self.capabilities),
+                "state": self.state,
+                "health": self.health,
+                "running": self._running,
+                "uptime_s": (now - self.start_time) if self.start_time else 0,
+                "messages_sent": self.messages_sent,
+                "messages_received": self.messages_received,
+            },
+            "neighbors": [
+                {
+                    "name": n.name,
+                    "pubkey": n.pubkey,
+                    "short_id": short_id(n.pubkey),
+                    "node_pubkey": n.node_pubkey,
+                    "citizen_type": n.citizen_type,
+                    "capabilities": list(n.capabilities),
+                    "addr": list(n.addr) if n.addr else None,
+                    "presence": n.presence.value,
+                    "state": n.state,
+                    "health": n.health,
+                    "last_seen_unix": n.last_seen,
+                    "age_s": (now - n.last_seen) if n.last_seen else None,
+                    "missed_heartbeats": n.missed_heartbeats,
+                    "has_constitution": n.has_constitution,
+                }
+                for n in self.neighbors.values()
+            ],
+            "recent_log": [
+                {"ts": m.timestamp, "type": m.msg_type, "sender": m.sender, "detail": m.detail}
+                for m in self.message_log
+            ],
+        }
+
     @property
     def constitution_hash(self) -> str | None:
         """Stable 16-hex-char fingerprint of the active constitution.
@@ -263,6 +316,18 @@ class Citizen:
         self._multicast.send(env)
         self.messages_sent += 1
         self._log("DISCOVER broadcast")
+
+    def _send_discover_unicast(self, addr: tuple):
+        """Directed DISCOVER — used to heal after restart when an unknown
+        citizen is heart-beating but never re-broadcasts its boot DISCOVER."""
+        env = make_envelope(
+            MessageType.DISCOVER,
+            self.pubkey,
+            {"name": self.name, "type": self.citizen_type, "unicast_port": self._unicast.bound_port},
+            self._signing_key,
+        )
+        self._unicast.send(env, addr)
+        self.messages_sent += 1
 
     def _send_advertise(self, recipient: str = "*", addr: tuple | None = None):
         """Advertise capabilities — broadcast or directed."""
@@ -481,6 +546,17 @@ class Citizen:
                     pass
             # v2.0: record contract health check
             self.contracts.record_health(sender)
+        else:
+            # Unknown sender heart-beating — heal by prompting an ADVERTISE.
+            # Throttled so a 1 Hz heartbeat doesn't trigger a 1 Hz unicast flood.
+            now = time.time()
+            last = self._unknown_hb_prompt.get(sender, 0)
+            if now - last >= 5.0:
+                self._unknown_hb_prompt[sender] = now
+                reply_addr = (addr[0], env.body.get("unicast_port", addr[1]))
+                name = env.body.get("name", "?")
+                self._log(f"unknown heartbeat from {name} [{short_id(sender)}] — unicast DISCOVER → {reply_addr}")
+                self._send_discover_unicast(reply_addr)
 
     def _handle_discover(self, env: Envelope, addr: tuple):
         self._log(f"DISCOVER from {env.body.get('name', '?')} [{short_id(env.sender)}]")

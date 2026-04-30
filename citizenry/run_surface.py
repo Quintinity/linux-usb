@@ -10,10 +10,28 @@ LeaderCitizen / ManipulatorCitizen on whichever node has the hardware.
 
 import argparse
 import asyncio
+import json
+import os
 import signal
 
 from .governor_citizen import GovernorCitizen
 from .survey import survey_hardware
+
+
+STATE_DUMP_PATH = "/tmp/governor.state.json"
+
+
+def _dump_state_to_file(citizen):
+    try:
+        state = citizen.dump_state()
+        tmp = f"{STATE_DUMP_PATH}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(state, f, indent=2, default=str)
+        os.replace(tmp, STATE_DUMP_PATH)
+        print(f"[surface] state dumped to {STATE_DUMP_PATH} "
+              f"({len(state['neighbors'])} neighbors)")
+    except Exception as e:
+        print(f"[surface] state dump failed: {e}")
 
 
 async def main(args):
@@ -26,6 +44,7 @@ async def main(args):
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(citizen)))
+    loop.add_signal_handler(signal.SIGUSR1, lambda: _dump_state_to_file(citizen))
 
     await citizen.start()
 
