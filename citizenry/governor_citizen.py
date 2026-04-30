@@ -14,6 +14,7 @@ import time
 
 from .citizen import Citizen, Neighbor, Presence
 from .protocol import MessageType
+from .authority import load_or_create_authority_key
 from .marketplace import TaskMarketplace, Task, Bid, compute_bid_score
 from .composition import CompositionEngine
 from .genome import CitizenGenome, compute_fleet_average
@@ -120,12 +121,19 @@ class GovernorCitizen(Citizen):
         self._log("governor ready — no arms, no recorder")
         self._log("waiting for citizens to join...")
 
+    def ratify_constitution(self, constitution) -> None:
+        """Sign and persist a Constitution with the Authority key (not the
+        per-citizen governor key). This is the canonical path for any
+        Constitution amendment going forward; smell #1 fix."""
+        auth_key = load_or_create_authority_key()
+        constitution.sign(auth_key)
+
     def _init_constitution(self):
-        """Create the default constitution, signed by this governor."""
+        """Create the default constitution, signed by the Authority key."""
         try:
             from .constitution import default_constitution
             const = default_constitution()
-            const.sign(self._signing_key)
+            self.ratify_constitution(const)
             self.constitution = const.to_dict()
             self.constitution_received = True
             self._log(f"constitution created — v{const.version}, {len(const.articles)} articles")
