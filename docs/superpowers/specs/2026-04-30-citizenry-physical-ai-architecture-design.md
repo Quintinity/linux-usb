@@ -215,9 +215,8 @@ Three independent identity axes, replacing today's implicit collapse:
 
 ```json
 {
-  "version": "2.0",
+  "version": 2,
   "authority_pubkey": "<hex>",
-  "ratified_at": "2026-04-30T00:00:00Z",
   "node_key_version": 1,
   "articles": { /* immutable safety floors */ },
   "laws": { /* mutable policies, signed individually */ },
@@ -228,6 +227,8 @@ Three independent identity axes, replacing today's implicit collapse:
   "signature": "<authority sig>"
 }
 ```
+
+(`version` is `int` to preserve compatibility with existing v1 wire format which uses `"version": 1`. `ratified_at` is deferred — see backlog.)
 
 **GOVERN message types** (extends the existing seventh message kind):
 - `GOVERN(amend_law, ...)` — change a Law within a clamp; Authority-signed.
