@@ -1,0 +1,20 @@
+[Unit]
+Description=armOS Jetson CSI Camera Citizen — IMX219 via gst-launch
+After=network-online.target citizenry-jetson.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bradley
+SupplementaryGroups=video
+WorkingDirectory=/home/bradley/linux-usb
+Environment=PYTHONPATH=/home/bradley/linux-usb
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/bradley/lerobot-env/bin/python -m citizenry.run_csi_camera --name jetson-csi-imx219 --resolution 640 480 --framerate 30 --sensor-id 0 --wbmode 1 --jpeg-quality 70
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
