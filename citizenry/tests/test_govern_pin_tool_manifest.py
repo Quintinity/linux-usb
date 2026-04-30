@@ -49,3 +49,13 @@ def test_pin_tool_manifest_rejects_short_sha(monkeypatch, tmp_path):
         "type": "pin_tool_manifest", "server": "bus-mcp", "sha256": "abc",
     }), addr=("127.0.0.1", 0))
     assert "bus-mcp" not in c.tool_manifest_pinning
+
+
+def test_pin_tool_manifest_rejects_non_hex_sha(monkeypatch, tmp_path):
+    """Sha256 must be hex even when length is 64."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    c = Citizen(name="test-pin-tm-hex", citizen_type="test", capabilities=[])
+    c._handle_govern(_env({
+        "type": "pin_tool_manifest", "server": "bus-mcp", "sha256": "g" * 64,
+    }), addr=("127.0.0.1", 0))
+    assert "bus-mcp" not in c.tool_manifest_pinning
