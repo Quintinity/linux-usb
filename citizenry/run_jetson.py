@@ -16,6 +16,8 @@ import argparse
 import asyncio
 import signal
 
+import cv2
+
 from .leader_citizen import LeaderCitizen
 from .manipulator_citizen import ManipulatorCitizen
 from .camera_citizen import CameraCitizen
@@ -74,6 +76,16 @@ async def main(args):
         if cam.kind == "usb":
             try:
                 idx = int(cam.path.replace("/dev/video", ""))
+                # Filter UVC metadata sub-devices: survey.py walks /dev/video*
+                # without checking V4L2 device caps, so each USB cam appears
+                # twice. cv2 opens metadata nodes without raising, but read()
+                # returns (False, None).
+                probe = cv2.VideoCapture(idx)
+                ok, _ = probe.read()
+                probe.release()
+                if not ok:
+                    print(f"[hardware] {cam.path} not capturable (likely UVC metadata), skipping")
+                    continue
                 role = _camera_role_for_path(cam.path)
                 cc = CameraCitizen(
                     camera_index=idx,
