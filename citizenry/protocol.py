@@ -95,6 +95,55 @@ class Envelope:
     def is_expired(self) -> bool:
         return time.time() > (self.timestamp + self.ttl)
 
+    def destination_addr(self) -> tuple[str, int]:
+        """Return ``(source_ip, source_port)`` — where a reply should be sent.
+
+        Raises ``ValueError`` if the envelope did not come off the wire (source
+        not populated). Used by ``reply()`` and by handlers that mint their own
+        unicast responses.
+        """
+        if not self.source_ip or self.source_port == 0:
+            raise ValueError(
+                "Envelope has no transport source — cannot derive a reply destination. "
+                "destination_addr()/reply() can only be called on envelopes received via transport.py."
+            )
+        return (self.source_ip, self.source_port)
+
+    def reply(
+        self,
+        msg_type: "MessageType",
+        sender_pubkey: str,
+        body: dict,
+        ttl: float | None = None,
+    ) -> "Envelope":
+        """Construct an unsigned unicast reply addressed to the original sender.
+
+        The returned envelope has ``recipient == self.sender``, default TTL
+        derived from ``msg_type``, and an empty signature — caller signs it
+        with their own role key. The caller is responsible for delivering it
+        via ``UnicastTransport.send(rep, self.destination_addr())``.
+        """
+        # Validate source is known — fail fast instead of sending into the void.
+        self.destination_addr()
+        default_ttls = {
+            MessageType.HEARTBEAT: TTL_HEARTBEAT,
+            MessageType.DISCOVER: TTL_DISCOVER,
+            MessageType.ADVERTISE: TTL_ADVERTISE,
+            MessageType.PROPOSE: TTL_PROPOSE,
+            MessageType.ACCEPT_REJECT: TTL_ACCEPT_REJECT,
+            MessageType.REPORT: TTL_REPORT,
+            MessageType.GOVERN: TTL_GOVERN,
+        }
+        return Envelope(
+            version=PROTOCOL_VERSION,
+            type=int(msg_type),
+            sender=sender_pubkey,
+            recipient=self.sender,
+            timestamp=time.time(),
+            ttl=ttl if ttl is not None else default_ttls.get(msg_type, 10.0),
+            body=body,
+        )
+
     def to_bytes(self) -> bytes:
         d = asdict(self)
         for k in self._NON_WIRE_FIELDS:
