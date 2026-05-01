@@ -43,13 +43,14 @@ def tmp_identity(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_baseline_constitution_is_signed_by_node(tmp_identity):
+def test_baseline_constitution_is_signed_by_authority(tmp_identity):
     srv = GovernorTabletServer(constitution_path=EMEX_CONSTITUTION_PATH)
     snap = srv.state_snapshot()
     assert snap["max_torque_pct"] == 60, "EMEX baseline must enforce 60% cap"
     assert not snap["paused"]
 
-    # Verify the embedded Constitution signature against the node pubkey.
+    # Verify the Constitution signature against the Authority pubkey
+    # (mirrored into governor_pubkey for v1 verifier compatibility).
     c = srv.current_dict
     payload = dict(c)
     payload.pop("signature", None)
@@ -75,7 +76,8 @@ def test_relax_amendment_signs_and_envelope_verifies(tmp_identity):
     assert result["version"] == srv.current_dict["version"]
     assert result["auto_revert_at"] is not None
 
-    # Re-verify the Constitution signature with the node's pubkey.
+    # Re-verify the Constitution signature against the Authority pubkey
+    # (mirrored into governor_pubkey for v1 verifier compatibility).
     c = srv.current_dict
     payload = dict(c); payload.pop("signature", None)
     signable = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()

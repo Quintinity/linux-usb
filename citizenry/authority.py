@@ -67,3 +67,36 @@ def authority_pubkey_hex() -> str:
     """Hex-encoded Ed25519 public key of the Authority."""
     sk = load_or_create_authority_key()
     return sk.verify_key.encode(encoder=nacl.encoding.RawEncoder).hex()
+
+
+def resign_constitution(constitution_dict: dict) -> dict:
+    """Re-sign a Constitution dict in place with the Authority key.
+
+    The canonical helper for any Constitution-amendment broadcast path. Used
+    by the MCP ``govern_update`` tool and by the EMEX tablet's ``_sign_dict``.
+
+    Avoids ``Constitution.from_dict`` because deployment-specific extensions
+    (EMEX: ``max_torque_pct``, ``position_envelope``, ``deployment``,
+    ``deployment_notes``) live in the wire dict but are not in the base
+    ``ServoLimits`` dataclass — a round trip would silently drop them.
+
+    Mirror semantics: the Authority pubkey is written into both
+    ``authority_pubkey`` and ``governor_pubkey`` so v1 verifiers and existing
+    wire consumers that read ``governor_pubkey`` directly still accept the
+    signature.
+
+    The multicast envelope carrying the amendment is signed separately by
+    the broadcaster's per-node identity — two layers, two distinct keys.
+    """
+    import json
+
+    auth_key = load_or_create_authority_key()
+    auth_pub_hex = auth_key.verify_key.encode().hex()
+    constitution_dict["authority_pubkey"] = auth_pub_hex
+    constitution_dict["governor_pubkey"] = auth_pub_hex
+    payload = dict(constitution_dict)
+    payload.pop("signature", None)
+    signable = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    signed = auth_key.sign(signable)
+    constitution_dict["signature"] = signed.signature.hex()
+    return constitution_dict

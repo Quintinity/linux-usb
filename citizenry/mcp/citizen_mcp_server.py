@@ -75,33 +75,13 @@ from citizenry.protocol import (
 
 
 def _resign_constitution_with_authority(constitution_dict: dict) -> dict:
-    """Strip any existing signature and re-sign the Constitution with the
-    Authority key. Returns the (mutated) dict.
+    """Delegates to ``citizenry.authority.resign_constitution``.
 
-    This is the canonical path for the MCP govern_update tool: any time the
-    MCP server mutates a Constitution and re-broadcasts it, the payload must
-    be signed by the Authority key (not the node key). The multicast envelope
-    that carries the payload remains signed by the node key — two layers,
-    two distinct keys.
-
-    Uses the canonical-JSON pattern (sorted keys, tight separators, signature
-    excluded) directly on the dict so EMEX extension fields
-    (``max_torque_pct``, ``max_voltage``, ``position_envelope``,
-    ``deployment``, ``deployment_notes``) survive — round-tripping through
-    ``Constitution.from_dict`` would strip them.
+    Kept as a module-level alias so existing tests and call sites that
+    reference this name don't churn.
     """
-    auth_key = load_or_create_authority_key()
-    auth_pub_hex = auth_key.verify_key.encode().hex()
-    constitution_dict["authority_pubkey"] = auth_pub_hex
-    # Mirror into governor_pubkey so v1 verifiers (and any cached wire-format
-    # consumers that pre-date v2 fields) still accept the signature.
-    constitution_dict["governor_pubkey"] = auth_pub_hex
-    payload = dict(constitution_dict)
-    payload.pop("signature", None)
-    signable = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    signed = auth_key.sign(signable)
-    constitution_dict["signature"] = signed.signature.hex()
-    return constitution_dict
+    from citizenry.authority import resign_constitution
+    return resign_constitution(constitution_dict)
 
 
 log = logging.getLogger("citizen.mcp")

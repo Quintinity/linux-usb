@@ -2,8 +2,9 @@
 
 Sibling to TDM's T14 diagnostic ledger. T14 is hash-only; T29 is hash +
 Ed25519-signed by the GovernorCitizen's node key, using the canonical-JSON
-pattern from ``governor_emex_tablet._sign_dict`` and
-``citizen_mcp_server.MeshAdapter._sign_dict``.
+pattern shared with ``citizenry.authority.resign_constitution`` (which is
+what governor_emex_tablet._sign_dict and citizen_mcp_server now delegate
+to).
 
 Pure local persistence: SQLite stdlib, no network, no async. Per-session
 hash chains; the signature covers the chain-hash so tampering with any

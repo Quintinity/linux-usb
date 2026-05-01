@@ -157,8 +157,9 @@ def test_govern_update_signs_amended_constitution(tmp_identity, monkeypatch, tmp
         assert c["version"] == result["version"]
 
         # Verify the *Constitution* signature using the canonical-JSON shape
-        # — the same logic _sign_dict uses. We're not allowed to round-trip
-        # through Constitution.from_dict because that strips EMEX fields.
+        # — the same logic citizenry.authority.resign_constitution uses. We
+        # can't round-trip through Constitution.from_dict because that
+        # strips EMEX extension fields.
         payload = dict(c)
         payload.pop("signature", None)
         signable = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
