@@ -33,6 +33,15 @@ struct Envelope {
     JsonObject body;
     std::string signature;  // hex Ed25519 signature
 
+    // ---- transport-only metadata (NOT signable, NOT serialised on wire) ----
+    // Populated by citizenry_dispatch.cpp after RX; empty otherwise.
+    // Mirrors citizenry/protocol.py Envelope.source_ip / source_port.
+    // Excluded from canonical_signable_bytes() and envelope_to_wire() — both
+    // functions enumerate fields explicitly, so adding struct members here
+    // is automatically a no-op for emit. See citizenry_envelope.cpp.
+    std::string source_ip;
+    int         source_port = 0;
+
     void body_clear() { body.clear(); }
     void body_set_string(const std::string& k, const std::string& v);
     void body_set_int(const std::string& k, long long v);

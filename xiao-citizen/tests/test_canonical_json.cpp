@@ -21,6 +21,26 @@ int main() {
         std::string got = canonical_signable_bytes(fx.envelope);
         check(fx.name + " canonical_bytes", got, fx.signable_bytes);
     }
+
+    // Sub-2: source_ip / source_port are local-only metadata. Setting them on
+    // an envelope MUST NOT change canonical_signable_bytes() or envelope_to_wire()
+    // — otherwise every existing signature breaks and Python/C++ interop diverges.
+    if (!fixtures.empty()) {
+        Envelope copy = fixtures[0].envelope;
+        std::string canonical_before = canonical_signable_bytes(copy);
+        copy.source_ip = "192.168.1.42";
+        copy.source_port = 50001;
+        std::string canonical_after = canonical_signable_bytes(copy);
+        check("source_fields_excluded_from_canonical", canonical_after, canonical_before);
+
+        std::string wire = envelope_to_wire(copy);
+        bool leaked = (wire.find("source_ip") != std::string::npos)
+                   || (wire.find("source_port") != std::string::npos);
+        check("source_fields_excluded_from_wire",
+              leaked ? std::string("LEAKED") : std::string("OK"),
+              std::string("OK"));
+    }
+
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
