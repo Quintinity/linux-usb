@@ -52,12 +52,23 @@ class Envelope:
     body: dict
     signature: str = ""   # Hex-encoded Ed25519 signature
 
+    # ---- transport-only metadata (NOT signable, NOT serialised on wire) ----
+    # Populated by transport.py after datagram_received(); empty otherwise.
+    # Excluded from signable_bytes() so existing signatures remain valid, and
+    # excluded from to_bytes() so receivers don't see spurious fields.
+    source_ip: str = ""
+    source_port: int = 0
+
+    _NON_WIRE_FIELDS = ("source_ip", "source_port")
+
     def signable_bytes(self) -> bytes:
         """Canonical bytes for signing — sorted keys, %.3f floats, tight separators.
 
         Format is locked down so the XIAO C++ firmware can produce byte-identical
         signables. Do not change without updating tests/test_signable_bytes.py and
         the C++ implementation in xiao-citizen/citizenry_envelope.cpp.
+
+        source_ip / source_port are deliberately excluded.
         """
         d = {
             "version": self.version,
@@ -85,11 +96,18 @@ class Envelope:
         return time.time() > (self.timestamp + self.ttl)
 
     def to_bytes(self) -> bytes:
-        return json.dumps(asdict(self), sort_keys=True, separators=(",", ":")).encode()
+        d = asdict(self)
+        for k in self._NON_WIRE_FIELDS:
+            d.pop(k, None)
+        return json.dumps(d, sort_keys=True, separators=(",", ":")).encode()
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "Envelope":
         d = json.loads(data)
+        # Ignore any incoming source_ip/source_port — they're transport-local;
+        # the receiving transport will populate them from the actual UDP addr.
+        for k in cls._NON_WIRE_FIELDS:
+            d.pop(k, None)
         return cls(**d)
 
 
