@@ -164,24 +164,24 @@ class ManipulatorCitizen(Citizen):
             self.state = "idle"
 
     def _on_constitution_received(self, sender: str, constitution: dict):
-        """Verify signature, then apply constitutional safety limits."""
-        # Verify the governor's signature before trusting the constitution
-        try:
-            from .constitution import Constitution
-            const = Constitution.from_dict(constitution)
-            if not const.verify():
-                self._log(f"CONSTITUTION REJECTED — invalid signature from [{sender[:8]}]")
-                self._add_log("SECURITY", sender[:8], "constitution signature invalid — rejected")
-                if self._governor_key and self._governor_addr:
-                    self.send_report(
-                        self._governor_key,
-                        {"type": "constitution_rejected", "citizen": self.name, "reason": "invalid_signature"},
-                        self._governor_addr,
-                    )
-                return
-            self._log("constitution signature verified OK")
-        except Exception as e:
-            self._log(f"constitution verification failed: {e} — applying anyway for compatibility")
+        """Verify signature, then apply constitutional safety limits.
+
+        Uses the wire-tolerant ``verify_constitution_dict`` helper so EMEX
+        extension fields (``max_torque_pct``, ``position_envelope``, etc.)
+        don't trip the base-dataclass round-trip path.
+        """
+        from .authority import verify_constitution_dict
+        if not verify_constitution_dict(constitution):
+            self._log(f"CONSTITUTION REJECTED — invalid signature from [{sender[:8]}]")
+            self._add_log("SECURITY", sender[:8], "constitution signature invalid — rejected")
+            if self._governor_key and self._governor_addr:
+                self.send_report(
+                    self._governor_key,
+                    {"type": "constitution_rejected", "citizen": self.name, "reason": "invalid_signature"},
+                    self._governor_addr,
+                )
+            return
+        self._log("constitution signature verified OK")
 
         servo_limits = constitution.get("servo_limits")
         if servo_limits:
@@ -272,6 +272,11 @@ class ManipulatorCitizen(Citizen):
         self._teleop_start = time.time()
         self._frames_received = 0
         self._frames_written = 0
+        # Reset the watchdog clock. Without this, the previous session's
+        # _last_frame_time leaks into a new accept and the watchdog trips
+        # immediately because "no frames for N seconds" is true the moment
+        # we re-enable the loop.
+        self._last_frame_time = 0.0
         self.state = "teleop"
 
         # Enable torque on all motors
@@ -312,12 +317,24 @@ class ManipulatorCitizen(Citizen):
             drop_rate = 1.0 - (self._frames_written / self._frames_received) if self._frames_received else 0
             self._log(f"teleop: {self._frames_received} rx, {fps:.1f} FPS, {drop_rate:.1%} drops")
 
+    # Watchdog timeout. Generous to handle VLA cold-start: SmolVLA on Orin
+    # Nano needs (~0.5s state-cache fill) + (~1.5s first-chunk forward) +
+    # (~33ms emit + scheduling jitter). 8s leaves headroom; once the action
+    # queue is primed, frames flow at ~30Hz so the watchdog only matters
+    # for the first cycle.
+    TELEOP_WATCHDOG_S: float = 8.0
+
     async def _teleop_watchdog(self):
-        """If no frame arrives for 500ms, stop motors for safety."""
+        """If no frame arrives for TELEOP_WATCHDOG_S, stop motors for safety."""
         while self._teleop_active and self._running:
             await asyncio.sleep(0.5)
-            if self._last_frame_time > 0 and time.time() - self._last_frame_time > 0.5:
-                self._log("WATCHDOG: no frames for 500ms — disabling torque")
+            if (
+                self._last_frame_time > 0
+                and time.time() - self._last_frame_time > self.TELEOP_WATCHDOG_S
+            ):
+                self._log(
+                    f"WATCHDOG: no frames for {self.TELEOP_WATCHDOG_S}s — disabling torque"
+                )
                 self._add_log("SAFETY", "watchdog", "no frames — torque disabled")
                 self._disable_torque()
                 self._teleop_active = False

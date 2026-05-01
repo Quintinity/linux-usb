@@ -680,7 +680,17 @@ class Citizen:
             hf_rev = body.get("hf_revision_sha", "")
             aibom = body.get("aibom_url", "")
             rekor = body.get("rekor_log_index", -1)
-            if policy_id and hf_rev:
+            # HF revision SHAs are git-style hex (full=40, abbreviated >=7).
+            # Accept anything in [7, 64] hex chars to allow short, full, and
+            # SHA-256-style references.
+            hf_rev_valid = False
+            if 7 <= len(hf_rev) <= 64:
+                try:
+                    int(hf_rev, 16)
+                    hf_rev_valid = True
+                except ValueError:
+                    hf_rev_valid = False
+            if policy_id and hf_rev_valid:
                 self.policy_pinning[policy_id] = {
                     "hf_revision_sha": hf_rev,
                     "aibom_url": aibom,
@@ -694,7 +704,8 @@ class Citizen:
             else:
                 self._log(
                     f"pin_policy MALFORMED from [{short_id(env.sender)}]: "
-                    f"missing policy_id or hf_revision_sha"
+                    f"policy_id={policy_id!r} hf_rev_len={len(hf_rev)} "
+                    f"hf_rev_valid={hf_rev_valid}"
                 )
 
         elif gov_type == "pin_tool_manifest":

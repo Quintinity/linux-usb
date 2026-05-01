@@ -69,8 +69,43 @@ def authority_pubkey_hex() -> str:
     return sk.verify_key.encode(encoder=nacl.encoding.RawEncoder).hex()
 
 
+def verify_constitution_dict(constitution_dict: dict) -> bool:
+    """Verify a Constitution wire dict's signature using the canonical-JSON
+    pattern, **without** round-tripping through ``Constitution.from_dict``.
+
+    Tolerates deployment-specific extensions (EMEX: ``max_torque_pct``,
+    ``position_envelope``, ``deployment``, ``deployment_notes``) that the
+    base ``Constitution`` dataclass doesn't model and that would otherwise
+    crash ``Constitution.from_dict`` with ``TypeError``.
+
+    Returns True only if the signature embedded in the dict verifies against
+    the pubkey embedded in the dict (``authority_pubkey`` preferred, falling
+    back to ``governor_pubkey`` for v1 compat). Returns False on any failure
+    — does not raise.
+    """
+    import json
+
+    sig_hex = constitution_dict.get("signature", "")
+    pub_hex = constitution_dict.get("authority_pubkey", "") or constitution_dict.get("governor_pubkey", "")
+    if not sig_hex or not pub_hex:
+        return False
+    try:
+        verify_key = nacl.signing.VerifyKey(bytes.fromhex(pub_hex))
+        payload = dict(constitution_dict)
+        payload.pop("signature", None)
+        signable = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        verify_key.verify(signable, bytes.fromhex(sig_hex))
+        return True
+    except Exception:
+        return False
+
+
 def resign_constitution(constitution_dict: dict) -> dict:
-    """Re-sign a Constitution dict in place with the Authority key.
+    """Re-sign a Constitution dict **in place** with the Authority key.
+
+    Mutates ``constitution_dict`` (sets ``authority_pubkey``,
+    ``governor_pubkey``, and ``signature``) and returns the same object.
+    Pass a copy if you need to preserve the input.
 
     The canonical helper for any Constitution-amendment broadcast path. Used
     by the MCP ``govern_update`` tool and by the EMEX tablet's ``_sign_dict``.
