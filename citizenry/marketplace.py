@@ -119,6 +119,9 @@ def compute_bid_score(
     fatigue: float = 0.0,
     weights: dict[str, float] | None = None,
     co_location_bonus: float = 0.0,
+    *,
+    bidder_node_pubkey: str = "",
+    stale_node_pubkeys: set[str] | None = None,
 ) -> float:
     """Compute composite bid score with fatigue modifier.
 
@@ -133,6 +136,12 @@ def compute_bid_score(
     co_location_bonus: extra absolute score awarded to bidders co-located
     with the targeted follower (same node_pubkey). Default 0.0; spec
     recommends 0.15.
+
+    bidder_node_pubkey + stale_node_pubkeys (smell #5 fix): if the bidder's
+    node_pubkey is in the caller's stale set (populated by the Sub-1
+    GOVERN(rotate_node_key) handler), the co-location bonus is suppressed
+    — co-location can't be trusted across a rotation until a fresh genome
+    re-attests the new pubkey.
     """
     w = {**DEFAULT_WEIGHTS, **(weights or {})}
     skill_norm = min(skill_level, 10) / 10.0
@@ -140,7 +149,17 @@ def compute_bid_score(
     h = max(0.0, min(1.0, health))
     base = w["capability"] * skill_norm + w["availability"] * avail + w["health"] * h
     fatigue_modifier = 1.0 - 0.3 * max(0.0, min(1.0, fatigue))
-    return base * fatigue_modifier + co_location_bonus
+
+    effective_bonus = co_location_bonus
+    if (
+        co_location_bonus
+        and bidder_node_pubkey
+        and stale_node_pubkeys
+        and bidder_node_pubkey in stale_node_pubkeys
+    ):
+        effective_bonus = 0.0
+
+    return base * fatigue_modifier + effective_bonus
 
 
 def select_winner(bids: list[Bid]) -> Bid | None:
