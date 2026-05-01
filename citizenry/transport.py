@@ -81,6 +81,10 @@ class _MulticastProtocol(asyncio.DatagramProtocol):
     def datagram_received(self, data: bytes, addr: tuple):
         try:
             env = Envelope.from_bytes(data)
+            # Populate transport-layer provenance before invoking the handler.
+            # IPv6 returns a 4-tuple; addr[0:2] is always (host, port).
+            env.source_ip = addr[0]
+            env.source_port = addr[1]
             self.on_message(env, addr)
         except Exception:
             pass  # Drop malformed packets silently
